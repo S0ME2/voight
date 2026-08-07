@@ -6,7 +6,30 @@
 
 `imaging.py`, `ocr.py`, and `roi.py` contain generic mechanics shared by pipelines. `documents/mrz.py` is the common MRZ localization and reconstruction implementation, configured by an ID-card or passport profile. `documents/driving_license.py` contains the alignment and ROI pipeline; `driving_license_fields.py` contains field-specific rules and parsing.
 
+The Uzbekistan passport profile derives its page quadrilateral from the detected
+MRZ and an MRZ-relative page annotation. It does not use the submitted image
+canvas, so a full booklet, one page, or a crop can use the same profile when
+the MRZ is visible.
+
 Use `python -m app.tools.roi_editor` to create crop or field ROI JSON and preview a configuration. Tools depend on production ROI mechanics, never the reverse.
+
+## Guided passport and ID-card annotation
+
+Run `python scripts/annotate.py INPUT OUTPUT` with `INPUT/passports/` and/or
+`INPUT/id_cards/<pair id>/{front,back}.<image extension>`. The wizard confirms
+the shown type/side, then asks for corners in this order: top-left, top-right,
+bottom-right, bottom-left; one canonical data/text crop; named field boxes; and
+expected values/MRZ. Press `u` to undo corner clicks or the last field, `r` to
+reset corner clicks, `s` to skip an unusable image, and `q`/Escape to save and
+exit. Re-run the same command to resume. It writes reusable geometry under
+`OUTPUT/profiles/`, private values to `OUTPUT/evaluation_ground_truth.json`,
+previews to `OUTPUT/previews/`, and `OUTPUT/progress.json`.
+You may add another supported image to the same input directory later and
+re-run the command; completed annotations remain intact and the new image is
+added to the wizard.
+
+Use `python scripts/annotate.py INPUT OUTPUT --check` to validate saved work
+and regenerate its machine-readable report without opening windows.
 
 ## Existing single-file endpoints
 
@@ -45,6 +68,10 @@ only the documentation schema to include `format: binary` alongside the OpenAPI
 3.1 media type; runtime values remain normal `UploadFile` objects. Remove this
 isolated workaround once Swagger UI supports binary array items declared with
 `contentMediaType`.
+
+The same upload types are used by `/v1` batch endpoints, whose multipart image
+field is named `images`; refresh `/docs` after a rebuild if Swagger has cached
+an older schema.
 
 Swagger UI can select multiple individual files through the `files` field. Standard Swagger UI does not provide browser folder selection because OpenAPI file inputs do not expose the non-standard `webkitdirectory` attribute.
 

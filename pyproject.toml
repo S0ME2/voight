@@ -5,17 +5,20 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "docaligner-docsaid>=1.1.1",
-    "dotenv>=0.9.9",
-    "fastapi>=0.139.2",
-    "fastmrz>=2.1.2",
-    "matplotlib>=3.11.1",
-    "mrzscanner-docsaid>=1.0.7",
-    "numpy>=2.3.5",
-    "paddleocr>=3.7.0",
+    "docaligner-docsaid==1.1.1",
+    "dotenv==0.9.9",
+    "fastapi==0.139.2",
+    "fastmrz==2.1.2",
+    "matplotlib==3.11.1",
+    "mrzscanner-docsaid==1.0.7",
+    "numpy==2.3.5",
+    "paddleocr==3.7.0",
     "paddlepaddle==3.2.2",
-    "python-multipart>=0.0.32",
-    "pyturbojpeg<2",
-    "requests>=2.34.2",
-    "uvicorn>=0.51.0",
+    "python-multipart==0.0.32",
+    "pyturbojpeg==1.8.3",
+    "requests==2.34.2",
+    "uvicorn==0.51.0",
 ]
+
+[dependency-groups]
+dev = []

@@ -1,0 +1,173 @@
+{
+  "version": 1,
+  "layout": "uzbekistan_id_card",
+  "canonical_size": {
+    "width": 812,
+    "height": 510
+  },
+  "sample_metadata": {
+    "available_logical_documents": 1,
+    "available_side_samples": {
+      "front": 1,
+      "back": 1
+    },
+    "limitations": "Geometry is from one supplied Uzbekistan ID-card front/back pair. It is not evidence of accuracy for other cards, captures, or layouts.",
+    "annotation_source": "annotations/annotation_state.json"
+  },
+  "regions": {
+    "front": {
+      "data_crop": {
+        "x1": 0.34236621856689453,
+        "y1": 0.1979321539402008,
+        "x2": 0.9913824796676636,
+        "y2": 0.8945895433425903
+      },
+      "field_rois": {
+        "surname": {
+          "x1": 0.007599677316436529,
+          "y1": 0.07610525059887424,
+          "x2": 0.5765623143141422,
+          "y2": 0.19618451328359246
+        },
+        "name": {
+          "x1": 0.0058394098241054985,
+          "y1": 0.24229482421308093,
+          "x2": 0.5466999415723808,
+          "y2": 0.3719670688793175
+        },
+        "patronymic": {
+          "x1": 0.005971657186183897,
+          "y1": 0.41373817518292205,
+          "x2": 0.5861860650587224,
+          "y2": 0.5197906668406918
+        },
+        "date_of_birth": {
+          "x1": 0.006095455411240622,
+          "y1": 0.5761084804151002,
+          "x2": 0.42292192097375203,
+          "y2": 0.6765587595760308
+        },
+        "date_of_issue": {
+          "x1": 0.006228483400109067,
+          "y1": 0.7485737366830506,
+          "x2": 0.42953529930057677,
+          "y2": 0.8623839046835459
+        },
+        "date_of_expiry": {
+          "x1": 0.00635297041350995,
+          "y1": 0.9098911218255452,
+          "x2": 0.4978521742660226,
+          "y2": 0.9999952943074852
+        },
+        "sex": {
+          "x1": 0.7107313040342976,
+          "y1": 0.5772012277750678,
+          "x2": 0.9852194286803752,
+          "y2": 0.6834399365193524
+        },
+        "citizenship": {
+          "x1": 0.6496516659585923,
+          "y1": 0.7455574733391505,
+          "x2": 0.9986820264630645,
+          "y2": 0.8602569316668851
+        },
+        "card_number": {
+          "x1": 0.5845617184663053,
+          "y1": 0.8999480790999533,
+          "x2": 0.9899815276149941,
+          "y2": 0.9821152027963107
+        }
+      }
+    },
+    "back": {
+      "data_crop": {
+        "x1": 0.25775885581970215,
+        "y1": 0.23825699090957642,
+        "x2": 0.5865867137908936,
+        "y2": 0.6307349801063538
+      },
+      "field_rois": {
+        "pinfl": {
+          "x1": 0.029817923961937467,
+          "y1": 0.12531079680616605,
+          "x2": 0.9725796546413729,
+          "y2": 0.3506110691956855
+        },
+        "place_of_birth": {
+          "x1": 0.01892540914904539,
+          "y1": 0.41628509961292015,
+          "x2": 0.9963857775934525,
+          "y2": 0.6496698856498592
+        },
+        "place_of_issue": {
+          "x1": 0.01489935499026975,
+          "y1": 0.7229243056011158,
+          "x2": 0.9447360579000641,
+          "y2": 0.9944091504411446
+        }
+      }
+    }
+  },
+  "fields": [
+    {
+      "name": "surname",
+      "region": "front",
+      "required": true
+    },
+    {
+      "name": "name",
+      "region": "front",
+      "required": true
+    },
+    {
+      "name": "patronymic",
+      "region": "front",
+      "required": false
+    },
+    {
+      "name": "date_of_birth",
+      "region": "front",
+      "required": true
+    },
+    {
+      "name": "date_of_issue",
+      "region": "front",
+      "required": true
+    },
+    {
+      "name": "date_of_expiry",
+      "region": "front",
+      "required": true
+    },
+    {
+      "name": "sex",
+      "region": "front",
+      "required": true
+    },
+    {
+      "name": "citizenship",
+      "region": "front",
+      "required": true
+    },
+    {
+      "name": "card_number",
+      "region": "front",
+      "required": true
+    },
+    {
+      "name": "pinfl",
+      "region": "back",
+      "required": true
+    },
+    {
+      "name": "place_of_birth",
+      "region": "back",
+      "required": false
+    },
+    {
+      "name": "place_of_issue",
+      "region": "back",
+      "required": false
+    }
+  ]
+}

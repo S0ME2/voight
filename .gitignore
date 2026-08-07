@@ -9,5 +9,12 @@ __pycache__/
 build/
 dist/
 logs/
+logs-from-container/
 outputs/
+code.zip
+.coverage
+.coverage.*
+htmlcov/
 .DS_Store
+.codex/
+AGENTS.md

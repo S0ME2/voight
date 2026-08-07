@@ -1,0 +1,39 @@
+services:
+  cpu:
+    build:
+      context: .
+      target: cpu
+    profiles: [cpu]
+    env_file: .env
+    environment:
+      RUNTIME_TARGET: cpu
+      OCR_DEVICE: cpu
+    ports: ["${VOIGHT_PORT:-8000}:8000"]
+    volumes: ["voight-artifacts:/app/logs"]
+
+  gpu:
+    build:
+      context: .
+      target: gpu
+    profiles: [gpu]
+    env_file: .env
+    environment:
+      RUNTIME_TARGET: gpu
+      OCR_DEVICE: gpu
+      REQUEST_QUEUE_LIMIT: "${REQUEST_QUEUE_LIMIT:-8}"
+      LOCALIZATION_BATCH_SIZE: "${LOCALIZATION_BATCH_SIZE:-2}"
+      TEXT_DETECTION_BATCH_SIZE: "${TEXT_DETECTION_BATCH_SIZE:-4}"
+      TEXT_RECOGNITION_BATCH_SIZE: "${TEXT_RECOGNITION_BATCH_SIZE:-8}"
+    ports: ["${VOIGHT_PORT:-8000}:8000"]
+    volumes: ["voight-artifacts:/app/logs"]
+    gpus: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  voight-artifacts:

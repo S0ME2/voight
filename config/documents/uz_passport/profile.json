@@ -1,0 +1,191 @@
+{
+  "version": 1,
+  "layout": "uzbekistan_passport",
+  "canonical_size": {
+    "width": 555,
+    "height": 393
+  },
+  "sample_metadata": {
+    "available_samples": 1,
+    "limitations": "Geometry is from one supplied Uzbekistan passport data-page image. It is not evidence of accuracy for other passports, generations, captures, or layouts.",
+    "annotation_source": "annotations/annotation_state.json"
+  },
+  "regions": {
+    "data_page": {
+      "data_crop": {
+        "x1": 0.314017117023468,
+        "y1": 0.0028004013001918793,
+        "x2": 0.9806067943572998,
+        "y2": 0.7204769253730774
+      },
+      "field_rois": {
+        "type": {
+          "x1": 0.041487612262294186,
+          "y1": 0.11728354801256632,
+          "x2": 0.16703704799893487,
+          "y2": 0.19280015956412105
+        },
+        "country_code": {
+          "x1": 0.22353380004987697,
+          "y1": 0.11362906247124803,
+          "x2": 0.5389432431777511,
+          "y2": 0.20157209589990543
+        },
+        "passport_number": {
+          "x1": 0.589735037781936,
+          "y1": 0.12002690892659777,
+          "x2": 0.9643393103727012,
+          "y2": 0.2402582457575552
+        },
+        "surname": {
+          "x1": 0.00953939453225769,
+          "y1": 0.21922339664725882,
+          "x2": 0.575100198783585,
+          "y2": 0.3029092240286229
+        },
+        "name": {
+          "x1": 0.010176358622004398,
+          "y1": 0.3181202214951402,
+          "x2": 0.5841299147432932,
+          "y2": 0.3986252725638344
+        },
+        "patronymic": {
+          "x1": 0.008090163748995285,
+          "y1": 0.4169647026671319,
+          "x2": 0.6067354112779707,
+          "y2": 0.49446639777638
+        },
+        "nationality": {
+          "x1": 0.008658723609268245,
+          "y1": 0.5058437244882003,
+          "x2": 0.5776803347855,
+          "y2": 0.5797119670365649
+        },
+        "date_of_birth": {
+          "x1": 0.00918230657094605,
+          "y1": 0.5891349914281002,
+          "x2": 0.4263138462947128,
+          "y2": 0.6685892032344177
+        },
+        "sex": {
+          "x1": 0.012524993251229778,
+          "y1": 0.6878012217244422,
+          "x2": 0.19037831473259892,
+          "y2": 0.7824378402627669
+        },
+        "place_of_birth": {
+          "x1": 0.2387516845100366,
+          "y1": 0.6846200716766807,
+          "x2": 0.7588744651839908,
+          "y2": 0.7832419520754821
+        },
+        "date_of_issue": {
+          "x1": 0.0051826263271873545,
+          "y1": 0.8167180686512433,
+          "x2": 0.4118652635185759,
+          "y2": 0.8894254069527444
+        },
+        "date_of_expiry": {
+          "x1": 0.016696488824313706,
+          "y1": 0.9091467433204261,
+          "x2": 0.4209729513581548,
+          "y2": 0.9998586450831191
+        },
+        "authority": {
+          "x1": 0.49295074296382024,
+          "y1": 0.8143505814240942,
+          "x2": 0.8933010262691019,
+          "y2": 0.9153376235872521
+        }
+      }
+    }
+  },
+  "fields": [
+    {
+      "name": "type",
+      "region": "data_page",
+      "required": false
+    },
+    {
+      "name": "country_code",
+      "region": "data_page",
+      "required": false
+    },
+    {
+      "name": "passport_number",
+      "region": "data_page",
+      "required": true
+    },
+    {
+      "name": "surname",
+      "region": "data_page",
+      "required": true
+    },
+    {
+      "name": "name",
+      "region": "data_page",
+      "required": true
+    },
+    {
+      "name": "patronymic",
+      "region": "data_page",
+      "required": false
+    },
+    {
+      "name": "nationality",
+      "region": "data_page",
+      "required": false
+    },
+    {
+      "name": "date_of_birth",
+      "region": "data_page",
+      "required": true
+    },
+    {
+      "name": "sex",
+      "region": "data_page",
+      "required": true
+    },
+    {
+      "name": "place_of_birth",
+      "region": "data_page",
+      "required": false
+    },
+    {
+      "name": "date_of_issue",
+      "region": "data_page",
+      "required": true
+    },
+    {
+      "name": "date_of_expiry",
+      "region": "data_page",
+      "required": true
+    },
+    {
+      "name": "authority",
+      "region": "data_page",
+      "required": false
+    }
+  ],
+  "document_localization": {
+    "strategy": "mrz_anchor",
+    "page_corners_relative_to_mrz_width": [
+      [
+        -0.03550295904278755,
+        -0.5838264226913452
+      ],
+      [
+        1.0611439943313599,
+        -0.5838264226913452
+      ],
+      [
+        1.0453648567199707,
+        0.19329388439655304
+      ],
+      [
+        -0.041420117020606995,
+        0.1794871836900711
+      ]
+    ]
+  }
+}

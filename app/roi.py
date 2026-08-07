@@ -44,18 +44,16 @@ def assign_tokens_to_rois(
     assignments = {name: [] for name in rois}
     unassigned = []
     for token in tokens:
-        left, top, right, bottom = (token[key] for key in ("x1", "y1", "x2", "y2"))
-        area = max(0.0, right - left) * max(0.0, bottom - top)
-        best_name, best_overlap = None, 0.0
-        for name, (x1, y1, x2, y2) in pixel_rois.items():
-            overlap = max(0.0, min(right, x2) - max(left, x1)) * max(0.0, min(bottom, y2) - max(top, y1))
-            ratio = overlap / area if area else 0.0
-            if ratio > best_overlap:
-                best_name, best_overlap = name, ratio
-        if best_name is None or best_overlap < min_overlap:
+        center_x = float(token.get("center_x", (float(token["x1"]) + float(token["x2"])) / 2))
+        center_y = float(token.get("center_y", (float(token["y1"]) + float(token["y2"])) / 2))
+        best_name = next(
+            (name for name, (x1, y1, x2, y2) in pixel_rois.items() if x1 <= center_x <= x2 and y1 <= center_y <= y2),
+            None,
+        )
+        if best_name is None:
             unassigned.append(token)
         else:
-            assignments[best_name].append({**token, "overlap_ratio": float(best_overlap)})
+            assignments[best_name].append({**token, "center_in_roi": True})
     return assignments, unassigned
 
 

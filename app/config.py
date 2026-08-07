@@ -22,6 +22,11 @@ def _path(name: str, default: Path) -> Path:
     return value.resolve() if value.is_absolute() else (PROJECT_ROOT / value).resolve()
 
 
+def _optional_path(name: str) -> Path | None:
+    value = os.getenv(name)
+    return None if not value else _path(name, Path(value))
+
+
 @dataclass(frozen=True)
 class ArtifactSettings:
     enabled: bool
@@ -60,6 +65,29 @@ class BatchSettings:
 
 
 @dataclass(frozen=True)
+class RuntimeSettings:
+    target: str = "cpu"
+    cpu_threads: int = 4
+    queue_limit: int = 32
+    localization_batch_size: int = 4
+    text_detection_batch_size: int = 8
+    text_recognition_batch_size: int = 32
+
+
+@dataclass(frozen=True)
+class ModelSettings:
+    """Pinned model directory; ``None`` preserves the legacy model lookup."""
+
+    directory: Path | None = None
+
+
+@dataclass(frozen=True)
+class ProfileSettings:
+    passport: Path = PROJECT_ROOT / "config/documents/uz_passport/profile.json"
+    id_card: Path = PROJECT_ROOT / "config/documents/uz_id_card/profile.json"
+
+
+@dataclass(frozen=True)
 class Settings:
     preload: bool
     artifacts: ArtifactSettings
@@ -67,16 +95,55 @@ class Settings:
     mrz: MrzSettings
     driving_license: DrivingLicenseSettings
     batch: BatchSettings = field(default_factory=BatchSettings)
+    runtime: RuntimeSettings = field(default_factory=RuntimeSettings)
+    models: ModelSettings = field(default_factory=ModelSettings)
+    profiles: ProfileSettings = field(default_factory=ProfileSettings)
+
+    def validate_startup(self) -> None:
+        if self.runtime.target not in {"cpu", "gpu"}:
+            raise ValueError("RUNTIME_TARGET must be 'cpu' or 'gpu'")
+        if self.ocr.device not in {"cpu", "gpu"}:
+            raise ValueError("OCR_DEVICE must be 'cpu' or 'gpu'")
+        if self.runtime.target != self.ocr.device:
+            raise ValueError("RUNTIME_TARGET and OCR_DEVICE must select the same runtime")
+
+        positive = {
+            "CPU_THREADS": self.runtime.cpu_threads,
+            "REQUEST_QUEUE_LIMIT": self.runtime.queue_limit,
+            "LOCALIZATION_BATCH_SIZE": self.runtime.localization_batch_size,
+            "TEXT_DETECTION_BATCH_SIZE": self.runtime.text_detection_batch_size,
+            "TEXT_RECOGNITION_BATCH_SIZE": self.runtime.text_recognition_batch_size,
+            "BATCH_MAX_FILES": self.batch.max_files,
+            "BATCH_MAX_FILE_BYTES": self.batch.max_file_bytes,
+            "BATCH_MAX_ARCHIVE_UNCOMPRESSED_BYTES": self.batch.max_archive_uncompressed_bytes,
+        }
+        for name, value in positive.items():
+            if value <= 0:
+                raise ValueError(f"{name} must be greater than zero")
+        if self.batch.max_archive_uncompressed_bytes < self.batch.max_file_bytes:
+            raise ValueError(
+                "BATCH_MAX_ARCHIVE_UNCOMPRESSED_BYTES must be at least BATCH_MAX_FILE_BYTES"
+            )
+
+        for name, path in {
+            "PASSPORT_PROFILE": self.profiles.passport,
+            "ID_CARD_PROFILE": self.profiles.id_card,
+        }.items():
+            if not path.is_file():
+                raise ValueError(f"{name} does not exist: {path}")
+        if self.models.directory is not None and not self.models.directory.is_dir():
+            raise ValueError(f"MODEL_DIR does not exist: {self.models.directory}")
 
     @classmethod
     def from_env(cls) -> "Settings":
-        return cls(
+        device = os.getenv("OCR_DEVICE", "cpu").strip().lower()
+        settings = cls(
             preload=_bool("PRELOAD", False),
             artifacts=ArtifactSettings(
                 _bool("LOGGING", True),
                 _path("LOG_DIR", PROJECT_ROOT / "logs"),
             ),
-            ocr=OcrSettings(os.getenv("OCR_DEVICE", "cpu")),
+            ocr=OcrSettings(device),
             mrz=MrzSettings(
                 os.getenv("MRZSCANNER_DETECTION_CFG", "20250222"),
                 int(os.getenv("OCR_MAX_SIDE", "3000")),
@@ -107,4 +174,27 @@ class Settings:
                     "BATCH_MAX_ARCHIVE_UNCOMPRESSED_BYTES", 500 * 1024 * 1024
                 ),
             ),
+            runtime=RuntimeSettings(
+                target=os.getenv("RUNTIME_TARGET", device).strip().lower(),
+                cpu_threads=_positive_int("CPU_THREADS", 4),
+                queue_limit=_positive_int("REQUEST_QUEUE_LIMIT", 32),
+                localization_batch_size=_positive_int("LOCALIZATION_BATCH_SIZE", 4),
+                text_detection_batch_size=_positive_int("TEXT_DETECTION_BATCH_SIZE", 8),
+                text_recognition_batch_size=_positive_int(
+                    "TEXT_RECOGNITION_BATCH_SIZE", 32
+                ),
+            ),
+            models=ModelSettings(_optional_path("MODEL_DIR")),
+            profiles=ProfileSettings(
+                _path(
+                    "PASSPORT_PROFILE",
+                    PROJECT_ROOT / "config/documents/uz_passport/profile.json",
+                ),
+                _path(
+                    "ID_CARD_PROFILE",
+                    PROJECT_ROOT / "config/documents/uz_id_card/profile.json",
+                ),
+            ),
         )
+        settings.validate_startup()
+        return settings

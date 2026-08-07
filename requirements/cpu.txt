@@ -1,0 +1,2 @@
+-r common.txt
+paddlepaddle==3.2.2

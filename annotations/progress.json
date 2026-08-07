@@ -1,0 +1,14 @@
+{
+  "valid": true,
+  "errors": [],
+  "samples": {
+    "pending": 0,
+    "complete": 3,
+    "skipped": 0
+  },
+  "profiles": [
+    "uzbekistan_id_card_back",
+    "uzbekistan_id_card_front",
+    "uzbekistan_passport"
+  ]
+}
