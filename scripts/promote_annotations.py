@@ -53,6 +53,27 @@ def _canonical_size(existing: dict) -> tuple[int, int]:
     return int(size["width"]), int(size["height"])
 
 
+def _canonical_region(sample: dict, width: int, height: int) -> tuple[dict, dict]:
+    """Convert legacy source-space annotations or pass through canonical ones."""
+    if sample.get("coordinate_space") == "canonical":
+        return sample["data_crop"], sample["fields"]
+    source_width, source_height = sample["original_size"]["width"], sample["original_size"]["height"]
+    source_corners = np.float32(sample["corners"]) * np.float32([source_width, source_height])
+    transform = cv2.getPerspectiveTransform(source_corners, np.float32([[0, 0], [width, 0], [width, height], [0, height]]))
+    crop = _bounds(cv2.perspectiveTransform(_rect_points(sample["data_crop"], source_width, source_height)[None, :, :], transform)[0], width, height)
+    rois = {}
+    for name, roi in sample["fields"].items():
+        source_roi = {
+            "x1": sample["data_crop"]["x1"] + roi["x1"] * (sample["data_crop"]["x2"] - sample["data_crop"]["x1"]),
+            "y1": sample["data_crop"]["y1"] + roi["y1"] * (sample["data_crop"]["y2"] - sample["data_crop"]["y1"]),
+            "x2": sample["data_crop"]["x1"] + roi["x2"] * (sample["data_crop"]["x2"] - sample["data_crop"]["x1"]),
+            "y2": sample["data_crop"]["y1"] + roi["y2"] * (sample["data_crop"]["y2"] - sample["data_crop"]["y1"]),
+        }
+        bounds = _bounds(cv2.perspectiveTransform(_rect_points(source_roi, source_width, source_height)[None, :, :], transform)[0], width, height)
+        rois[name] = _relative(bounds, crop)
+    return crop, rois
+
+
 def promote(annotation_state: Path, config_dir: Path, passport_anchor: Path | None = None) -> None:
     state = json.loads(annotation_state.read_text(encoding="utf-8"))
     grouped: dict[str, list[dict]] = {}
@@ -61,6 +82,16 @@ def promote(annotation_state: Path, config_dir: Path, passport_anchor: Path | No
             grouped.setdefault(sample["layout"], []).append(sample)
 
     for layout, samples in grouped.items():
+        if layout == "driving_license":
+            # The licence input is already canonical; runtime config is generated,
+            # never separately annotated.
+            sample = samples[0]
+            destination = config_dir.parent / "driving_license"
+            destination.mkdir(parents=True, exist_ok=True)
+            crop, rois = _canonical_region(sample, 1000, 630)
+            (destination / "data_crop.json").write_text(json.dumps({"data_crop": crop}, indent=2) + "\n", encoding="utf-8")
+            (destination / "field_rois_crop.json").write_text(json.dumps(rois, indent=2) + "\n", encoding="utf-8")
+            continue
         destination = config_dir / ("uz_passport" if layout == "uzbekistan_passport" else "uz_id_card") / "profile.json"
         existing = json.loads(destination.read_text(encoding="utf-8"))
         width, height = _canonical_size(existing)
@@ -68,21 +99,11 @@ def promote(annotation_state: Path, config_dir: Path, passport_anchor: Path | No
         required = {field["name"]: field["required"] for field in existing["fields"]}
         for sample in samples:
             region = "data_page" if sample["side"] is None else sample["side"]
-            source_width, source_height = sample["original_size"]["width"], sample["original_size"]["height"]
-            source_corners = np.float32(sample["corners"]) * np.float32([source_width, source_height])
-            transform = cv2.getPerspectiveTransform(source_corners, np.float32([[0, 0], [width, 0], [width, height], [0, height]]))
-            crop = _bounds(cv2.perspectiveTransform(_rect_points(sample["data_crop"], source_width, source_height)[None, :, :], transform)[0], width, height)
+            crop, raw_rois = _canonical_region(sample, width, height)
             rois = {}
-            for name, roi in sample["fields"].items():
+            for name, roi in raw_rois.items():
                 name = FIELD_ALIASES.get(name, name)
-                source_roi = {
-                    "x1": sample["data_crop"]["x1"] + roi["x1"] * (sample["data_crop"]["x2"] - sample["data_crop"]["x1"]),
-                    "y1": sample["data_crop"]["y1"] + roi["y1"] * (sample["data_crop"]["y2"] - sample["data_crop"]["y1"]),
-                    "x2": sample["data_crop"]["x1"] + roi["x2"] * (sample["data_crop"]["x2"] - sample["data_crop"]["x1"]),
-                    "y2": sample["data_crop"]["y1"] + roi["y2"] * (sample["data_crop"]["y2"] - sample["data_crop"]["y1"]),
-                }
-                bounds = _bounds(cv2.perspectiveTransform(_rect_points(source_roi, source_width, source_height)[None, :, :], transform)[0], width, height)
-                rois[name] = _relative(bounds, crop)
+                rois[name] = roi
                 fields.append({"name": name, "region": region, "required": required.get(name, False)})
             regions[region] = {"data_crop": crop, "field_rois": rois}
         profile = {
@@ -91,8 +112,9 @@ def promote(annotation_state: Path, config_dir: Path, passport_anchor: Path | No
             "regions": regions,
             "fields": fields,
         }
-        if layout == "uzbekistan_passport" and passport_anchor is not None:
-            anchor = json.loads(passport_anchor.read_text(encoding="utf-8"))
+        anchor = next((sample.get("mrz_anchor") for sample in samples if sample.get("mrz_anchor")), None)
+        if layout == "uzbekistan_passport" and (anchor or passport_anchor is not None):
+            anchor = anchor or json.loads(passport_anchor.read_text(encoding="utf-8"))
             profile["document_localization"] = {
                 "strategy": "mrz_anchor",
                 "page_corners_relative_to_mrz_width": anchor.get("page_corners_relative_to_mrz_width")

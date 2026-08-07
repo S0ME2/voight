@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "layouts": [
+    {
+      "input_directory": "passports",
+      "document_type": "passport",
+      "layout": "uzbekistan_passport",
+      "annotation_mode": "mrz_page",
+      "canonical_size": {"width": 555, "height": 393}
+    },
+    {
+      "input_directory": "id_cards",
+      "document_type": "id_card",
+      "layout": "uzbekistan_id_card",
+      "pair_sides": ["front", "back"],
+      "annotation_mode": "document",
+      "canonical_size": {"width": 812, "height": 510}
+    },
+    {
+      "input_directory": "driving_licenses",
+      "document_type": "driving_license",
+      "layout": "driving_license",
+      "annotation_mode": "canonical",
+      "canonical_size": {"width": 1000, "height": 630},
+      "seed": {"data_crop_file": "config/driving_license/data_crop.json", "fields_file": "config/driving_license/field_rois_crop.json"}
+    }
+  ]
+}

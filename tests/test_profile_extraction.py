@@ -8,6 +8,7 @@ import numpy as np
 from app.artifacts import ArtifactWriter
 from app.config import DrivingLicenseSettings
 from app.documents.driving_license import extract as extract_driving_license
+from app.documents.driving_license_fields import parse_fields
 from app.pipeline import RegionProfile, extract_profile, load_region_profile
 from app.roi import assign_tokens_to_rois
 
@@ -103,7 +104,7 @@ class ProfileExtractionTests(unittest.TestCase):
                     {
                         "rec_texts": ["1. KARIMOV", "2. ALI"],
                         "rec_scores": [0.9, 0.8],
-                        "rec_boxes": [[10, 10, 200, 40], [10, 55, 200, 95]],
+                        "rec_boxes": [[10, 10, 200, 40], [10, 35, 200, 65]],
                     }
                 ]
 
@@ -126,10 +127,10 @@ class ProfileExtractionTests(unittest.TestCase):
         extracted, report = extract_driving_license(
             image, aligner, OcrStub(), self.writer, settings
         )
-        self.assertEqual("KARIMOV", extracted["surname"])
-        self.assertEqual("ALI", extracted["given_names"])
+        self.assertEqual("1. KARIMOV", extracted["surname"])
+        self.assertEqual("2. ALI", extracted["given_names"])
         self.assertEqual(0.9, report["field_confidences"]["surname"]["score"])
-        self.assertIn("Missing required field: birth_date", report["validation_warnings"])
+        self.assertEqual([], report["validation_warnings"])
 
     def test_token_center_must_be_inside_its_field(self):
         assignments, unassigned = assign_tokens_to_rois(
@@ -141,6 +142,33 @@ class ProfileExtractionTests(unittest.TestCase):
         )
         self.assertEqual([], assignments["field"])
         self.assertEqual(["label"], [token["text"] for token in unassigned])
+
+    def test_driving_license_annotation_labels_feed_canonical_fields(self):
+        def token(text, y):
+            return [{"text": text, "center_x": 10, "center_y": y, "x1": 0}]
+
+        extracted, raw = parse_fields({
+            "surname": token("1. QOBULOV", 1),
+            "name": token("2. HUSNIDDIN", 2),
+            "place_of_birth": token("3. TOSHLOQ 19.10.2005", 3),
+            "date_of_issue": token("4a. 17.02.2026", 4),
+            "date_of_expiry": token("4b. 17.02.2036", 5),
+            "place_of_issue": token("4c. TERMIZ DXM", 6),
+            "id_number": token("4d. 51910056970036", 7),
+            "id_number_2": token("5. AG2742395", 8),
+            "place_of_living": token("8. FARGONA", 9),
+            "types": token("9. B", 10),
+            "serial_number": token("DL0008047407", 11),
+        })
+        self.assertEqual("2. HUSNIDDIN", extracted["given_names"])
+        self.assertEqual("3. TOSHLOQ 19.10.2005", extracted["birth_place"])
+        self.assertIsNone(extracted["birth_date"])
+        self.assertEqual("4a. 17.02.2026", extracted["issue_date"])
+        self.assertEqual("4b. 17.02.2036", extracted["expiry_date"])
+        self.assertEqual("4d. 51910056970036", extracted["personal_id"])
+        self.assertEqual("5. AG2742395", extracted["license_number"])
+        self.assertEqual("9. B", extracted["categories"])
+        self.assertEqual("2. HUSNIDDIN", raw["given_names"])
 
 
 if __name__ == "__main__":

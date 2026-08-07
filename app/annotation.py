@@ -12,10 +12,15 @@ from typing import Any
 import cv2
 import numpy as np
 
-from app.imaging import draw_polygon
+from app.config import Settings
+from app.documents.passport_localization import relative_to_mrz_width
+from app.imaging import draw_polygon, order_corners, warp_to_size
+from app.models import Models
 from app.roi import crop_normalized_roi, draw_roi_assignments, normalized_roi_to_pixels
 
 IMAGE_EXTENSIONS = {".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_LAYOUTS = ROOT / "config" / "annotation_layouts.json"
 
 
 @dataclass(frozen=True)
@@ -25,37 +30,56 @@ class Sample:
     layout: str
     side: str | None
     path: Path
+    annotation_mode: str = "document"
+    canonical_size: dict[str, int] | None = None
+    seed: dict[str, str] | None = None
 
 
-def discover_inputs(input_dir: Path) -> list[Sample]:
-    """Discover the fixed passport/ID-card input layout in a stable order."""
+def _layouts(layouts_path: Path = DEFAULT_LAYOUTS) -> list[dict[str, Any]]:
+    try:
+        data = json.loads(layouts_path.read_text(encoding="utf-8"))
+        layouts = data["layouts"]
+    except (OSError, TypeError, ValueError, KeyError) as error:
+        raise ValueError(f"Invalid annotation layout definition {layouts_path}: {error}") from error
+    if not isinstance(layouts, list) or not layouts:
+        raise ValueError(f"Annotation layout definition has no layouts: {layouts_path}")
+    return layouts
+
+
+def _sample(layout: dict[str, Any], path: Path, key: str, side: str | None = None) -> Sample:
+    size = layout.get("canonical_size")
+    if size is not None and (not isinstance(size, dict) or not all(isinstance(size.get(name), int) and size[name] > 0 for name in ("width", "height"))):
+        raise ValueError(f"Invalid canonical_size for annotation layout {layout.get('layout')}")
+    return Sample(key, layout["document_type"], layout["layout"], side, path, layout.get("annotation_mode", "document"), size, layout.get("seed"))
+
+
+def discover_inputs(input_dir: Path, layouts_path: Path = DEFAULT_LAYOUTS) -> list[Sample]:
+    """Discover annotation inputs from the JSON-defined layouts in stable order."""
     samples: list[Sample] = []
-    passports = input_dir / "passports"
-    if passports.exists():
-        if not passports.is_dir():
-            raise ValueError(f"Expected directory: {passports}")
-        for path in sorted(passports.iterdir(), key=lambda item: item.name.lower()):
-            if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS:
-                samples.append(Sample(f"passport:{path.name}", "passport", "uzbekistan_passport", None, path))
-    cards = input_dir / "id_cards"
-    if cards.exists():
-        if not cards.is_dir():
-            raise ValueError(f"Expected directory: {cards}")
-        for pair in sorted(cards.iterdir(), key=lambda item: item.name.lower()):
-            if not pair.is_dir():
-                raise ValueError(f"ID cards must use one directory per pair; found {pair}")
-            sides: dict[str, list[Path]] = {"front": [], "back": []}
-            for path in pair.iterdir():
-                if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS and path.stem.lower() in sides:
-                    sides[path.stem.lower()].append(path)
-            for side, paths in sides.items():
-                if len(paths) != 1:
-                    detail = "missing" if not paths else f"duplicate ({', '.join(path.name for path in paths)})"
-                    raise ValueError(f"ID-card pair {pair.name!r} has {detail} {side} image; use exactly one {side}.<image extension>")
-                path = paths[0]
-                samples.append(Sample(f"id_card:{pair.name}:{side}", "id_card", "uzbekistan_id_card", side, path))
+    for layout in _layouts(layouts_path):
+        directory = input_dir / layout["input_directory"]
+        if not directory.exists():
+            continue
+        if not directory.is_dir():
+            raise ValueError(f"Expected directory: {directory}")
+        prefix = layout["document_type"]
+        sides = layout.get("pair_sides")
+        if sides:
+            for pair in sorted(directory.iterdir(), key=lambda item: item.name.lower()):
+                if not pair.is_dir():
+                    raise ValueError(f"{layout['document_type']} inputs must use one directory per pair; found {pair}")
+                for side in sides:
+                    paths = [item for item in pair.iterdir() if item.is_file() and item.suffix.lower() in IMAGE_EXTENSIONS and item.stem.lower() == side]
+                    if len(paths) != 1:
+                        detail = "missing" if not paths else f"duplicate ({', '.join(path.name for path in paths)})"
+                        raise ValueError(f"{layout['document_type']} pair {pair.name!r} has {detail} {side} image; use exactly one {side}.<image extension>")
+                    samples.append(_sample(layout, paths[0], f"{prefix}:{pair.name}:{side}", side))
+        else:
+            for path in sorted(directory.iterdir(), key=lambda item: item.name.lower()):
+                if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS:
+                    samples.append(_sample(layout, path, f"{prefix}:{path.name}"))
     if not samples:
-        raise ValueError(f"No supported images found under {input_dir}; expected passports/ and/or id_cards/")
+        raise ValueError(f"No supported images found under {input_dir}; see {layouts_path}")
     return samples
 
 
@@ -77,6 +101,18 @@ def validate_corners(corners: list[list[float]] | list[tuple[float, float]]) -> 
     if abs(cv2.contourArea(points)) < 0.0001:
         raise ValueError("Document corners cover no usable area")
     return points.tolist()
+
+
+def _rect_points(rect: dict[str, float], width: float, height: float) -> np.ndarray:
+    return np.float32([[rect["x1"] * width, rect["y1"] * height], [rect["x2"] * width, rect["y1"] * height], [rect["x2"] * width, rect["y2"] * height], [rect["x1"] * width, rect["y2"] * height]])
+
+
+def _bounds(points: np.ndarray, width: int, height: int) -> dict[str, float]:
+    return {"x1": float(points[:, 0].min() / width), "y1": float(points[:, 1].min() / height), "x2": float(points[:, 0].max() / width), "y2": float(points[:, 1].max() / height)}
+
+
+def _relative(bounds: dict[str, float], crop: dict[str, float]) -> dict[str, float]:
+    return {"x1": (bounds["x1"] - crop["x1"]) / (crop["x2"] - crop["x1"]), "y1": (bounds["y1"] - crop["y1"]) / (crop["y2"] - crop["y1"]), "x2": (bounds["x2"] - crop["x1"]) / (crop["x2"] - crop["x1"]), "y2": (bounds["y2"] - crop["y1"]) / (crop["y2"] - crop["y1"])}
 
 
 def atomic_write_json(path: Path, data: Any) -> None:
@@ -102,8 +138,11 @@ class AnnotationStore:
             for sample in samples:
                 if sample.key not in existing:
                     self.data["samples"][sample.key] = self._new_sample(sample)
-            if wanted != existing:
-                self.save()
+                else:
+                    self._hydrate(self.data["samples"][sample.key], sample)
+                    self._import_legacy_mrz_anchor(self.data["samples"][sample.key])
+                    self._migrate_passport_to_mrz_page(self.data["samples"][sample.key])
+            self.save()
         else:
             self.data = {"version": 1, "samples": {sample.key: self._new_sample(sample) for sample in samples}}
             self.save()
@@ -114,7 +153,69 @@ class AnnotationStore:
         if image is None:
             raise ValueError(f"Cannot read image: {sample.path}")
         height, width = image.shape[:2]
-        return {**asdict(sample), "path": str(sample.path), "original_size": {"width": width, "height": height}, "status": "pending"}
+        item = {**asdict(sample), "path": str(sample.path), "original_size": {"width": width, "height": height}, "status": "pending"}
+        AnnotationStore._hydrate(item, sample)
+        if sample.seed:
+            try:
+                crop = json.loads((ROOT / sample.seed["data_crop_file"]).read_text(encoding="utf-8"))["data_crop"]
+                fields = json.loads((ROOT / sample.seed["fields_file"]).read_text(encoding="utf-8"))
+                item.update({"corners": [[0, 0], [1, 0], [1, 1], [0, 1]], "data_crop": crop, "fields": fields, "expected_fields": {}, "mrz": "", "coordinate_space": "canonical", "status": "complete"})
+            except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+                raise ValueError(f"Cannot seed {sample.key} from annotation layout: {error}") from error
+        return item
+
+    @staticmethod
+    def _hydrate(item: dict[str, Any], sample: Sample) -> None:
+        item.pop("field_names", None)
+        item.update({"annotation_mode": sample.annotation_mode, "canonical_size": sample.canonical_size})
+        if item.get("annotation_mode") == "mrz_page" and "sec" in item.get("fields", {}):
+            item["fields"]["sex"] = item["fields"].pop("sec")
+            if "sec" in item.get("expected_fields", {}):
+                item["expected_fields"]["sex"] = item["expected_fields"].pop("sec")
+        if sample.annotation_mode == "canonical":
+            item.setdefault("coordinate_space", "canonical")
+
+    def _import_legacy_mrz_anchor(self, item: dict[str, Any]) -> None:
+        """One-time migration: preview JSON is no longer an annotation source."""
+        if item.get("annotation_mode") != "mrz_page" or item.get("mrz_anchor"):
+            return
+        legacy = self.output_dir / "previews" / "passport_mrz.json"
+        if not legacy.is_file():
+            return
+        try:
+            anchor = json.loads(legacy.read_text(encoding="utf-8"))
+            item["mrz_anchor"] = {
+                "mrz_polygon": anchor["mrz_polygon"],
+                "page_corners": anchor["page_corners"],
+                "page_corners_relative_to_mrz_width": anchor.get("page_corners_relative_to_mrz_width") or relative_to_mrz_width(anchor["mrz_polygon"], anchor["page_corners"]),
+            }
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            raise ValueError(f"Cannot import legacy passport MRZ anchor: {error}") from error
+
+    @staticmethod
+    def _migrate_passport_to_mrz_page(item: dict[str, Any]) -> None:
+        """Move old source-canvas ROIs onto the MRZ-anchored rectified page."""
+        if item.get("annotation_mode") != "mrz_page" or item.get("coordinate_space") == "canonical" or not item.get("mrz_anchor") or "data_crop" not in item:
+            return
+        try:
+            source_width, source_height = item["original_size"]["width"], item["original_size"]["height"]
+            size = item["canonical_size"]
+            width, height = int(size["width"]), int(size["height"])
+            page = np.float32(item["mrz_anchor"]["page_corners"])
+            transform = cv2.getPerspectiveTransform(page, np.float32([[0, 0], [width, 0], [width, height], [0, height]]))
+            crop = _bounds(cv2.perspectiveTransform(_rect_points(item["data_crop"], source_width, source_height)[None], transform)[0], width, height)
+            fields = {}
+            for name, roi in item.get("fields", {}).items():
+                absolute = {
+                    "x1": item["data_crop"]["x1"] + roi["x1"] * (item["data_crop"]["x2"] - item["data_crop"]["x1"]),
+                    "y1": item["data_crop"]["y1"] + roi["y1"] * (item["data_crop"]["y2"] - item["data_crop"]["y1"]),
+                    "x2": item["data_crop"]["x1"] + roi["x2"] * (item["data_crop"]["x2"] - item["data_crop"]["x1"]),
+                    "y2": item["data_crop"]["y1"] + roi["y2"] * (item["data_crop"]["y2"] - item["data_crop"]["y1"]),
+                }
+                fields[name] = _relative(_bounds(cv2.perspectiveTransform(_rect_points(absolute, source_width, source_height)[None], transform)[0], width, height), crop)
+            item.update({"corners": [[0, 0], [1, 0], [1, 1], [0, 1]], "data_crop": crop, "fields": fields, "coordinate_space": "canonical"})
+        except (KeyError, TypeError, ValueError, cv2.error) as error:
+            raise ValueError(f"Cannot migrate passport {item.get('key', '<unknown>')} to MRZ page: {error}") from error
 
     def save(self) -> None:
         atomic_write_json(self.path, self.data)
@@ -152,6 +253,29 @@ def validate_state(data: dict[str, Any]) -> list[str]:
     return errors
 
 
+def _canonical_image(image: np.ndarray, sample: dict[str, Any]) -> np.ndarray:
+    """Return the image coordinate space in which this sample's ROIs are drawn."""
+    if sample.get("annotation_mode") != "mrz_page" or not sample.get("mrz_anchor"):
+        return image
+    anchor = sample["mrz_anchor"]
+    size = sample.get("canonical_size") or {}
+    try:
+        return warp_to_size(image, np.asarray(anchor["page_corners"], dtype=np.float32), int(size["width"]), int(size["height"]))
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"Invalid MRZ anchor for {sample['key']}: {error}") from error
+
+
+def _detect_mrz_anchor(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Detect the MRZ once, then let the user define the page relative to it."""
+    detected = Models(Settings.from_env()).mrz_scanner()(image, do_center_crop=False)
+    try:
+        polygon = order_corners(np.asarray(detected["mrz_polygon"], dtype=np.float32).reshape(4, 2))
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("MRZ detector did not return a usable MRZ polygon") from error
+    page = np.asarray(_click_corners(draw_polygon(image, polygon), normalized=False, title="MRZ detected. Click passport page: top-left, top-right, bottom-right, bottom-left"), dtype=np.float32)
+    return polygon, page
+
+
 def write_outputs(store: AnnotationStore) -> dict[str, Any]:
     errors = validate_state(store.data)
     samples = store.data["samples"]
@@ -187,10 +311,15 @@ def write_preview(store: AnnotationStore, sample: dict[str, Any]) -> None:
     height, width = image.shape[:2]
     corners = np.asarray(sample["corners"], dtype=np.float32) * np.array([width, height], dtype=np.float32)
     preview = draw_polygon(image, corners)
+    if sample.get("mrz_anchor"):
+        anchor = sample["mrz_anchor"]
+        preview = draw_polygon(draw_polygon(preview, np.asarray(anchor["mrz_polygon"], dtype=np.float32)), np.asarray(anchor["page_corners"], dtype=np.float32))
+        atomic_write_json(store.output_dir / "previews" / f"{sample['key'].replace(':', '_')}_mrz.json", anchor)
+        atomic_write_json(store.output_dir / "previews" / "passport_mrz.json", anchor)
     preview_path = store.output_dir / "previews" / f"{sample['key'].replace(':', '_')}.jpg"
     preview_path.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(preview_path), preview)
-    fields_preview = draw_roi_assignments(crop_normalized_roi(image, sample["data_crop"]), sample.get("fields", {}), {})
+    fields_preview = draw_roi_assignments(crop_normalized_roi(_canonical_image(image, sample), sample["data_crop"]), sample.get("fields", {}), {})
     cv2.imwrite(str(preview_path.with_name(preview_path.stem + "_fields.jpg")), fields_preview)
 
 
@@ -204,8 +333,8 @@ def _ask(prompt: str, choices: str = "") -> str:
     return answer
 
 
-def _click_corners(image: np.ndarray) -> list[list[float]]:
-    title, points = "Click corners: top-left, top-right, bottom-right, bottom-left (u undo, r reset)", []
+def _click_corners(image: np.ndarray, normalized: bool = True, title: str = "Click corners: top-left, top-right, bottom-right, bottom-left") -> list[list[float]]:
+    title, points = f"{title} (u undo, r reset)", []
     shown = image.copy()
 
     def click(event: int, x: int, y: int, _flags: int, _data: Any) -> None:
@@ -228,7 +357,8 @@ def _click_corners(image: np.ndarray) -> list[list[float]]:
         elif key in (13, 32) and len(points) == 4:
             cv2.destroyWindow(title)
             height, width = image.shape[:2]
-            return validate_corners([[x / width, y / height] for x, y in points])
+            selected = [[x / width, y / height] for x, y in points]
+            return validate_corners(selected) if normalized else order_corners(np.asarray(points, dtype=np.float32)).tolist()
         elif key in (27, ord("q")):
             cv2.destroyWindow(title)
             raise KeyboardInterrupt
@@ -255,8 +385,24 @@ def annotate_sample(store: AnnotationStore, sample: dict[str, Any]) -> None:
         return
     if action == "b":
         return
-    sample["corners"] = _click_corners(image)
+    mode = sample.get("annotation_mode", "document")
+    if mode == "mrz_page":
+        print("Detecting MRZ. The next window is the MRZ overlay; click the passport page, then annotate the rectified page.")
+        mrz, page = _detect_mrz_anchor(image)
+        sample["mrz_anchor"] = {
+            "mrz_polygon": mrz.tolist(),
+            "page_corners": page.tolist(),
+            "page_corners_relative_to_mrz_width": relative_to_mrz_width(mrz, page),
+        }
+        sample["corners"] = [[0, 0], [1, 0], [1, 1], [0, 1]]
+        sample["coordinate_space"] = "canonical"
+    elif mode == "canonical":
+        sample["corners"] = [[0, 0], [1, 0], [1, 1], [0, 1]]
+        sample["coordinate_space"] = "canonical"
+    else:
+        sample["corners"] = _click_corners(image)
     store.save()
+    image = _canonical_image(image, sample)
     canonical = next((item for item in store.data["samples"].values() if item is not sample and item.get("status") == "complete" and profile_key(item) == profile_key(sample) and "data_crop" in item), None)
     if canonical and _ask(f"Reuse field geometry from {canonical['key']}? Enter=yes, r=redraw: ") != "r":
         sample["data_crop"] = canonical["data_crop"]
@@ -302,8 +448,8 @@ def annotate_sample(store: AnnotationStore, sample: dict[str, Any]) -> None:
     write_preview(store, sample)
 
 
-def run(input_dir: Path, output_dir: Path, check: bool = False) -> int:
-    samples = discover_inputs(input_dir)
+def run(input_dir: Path, output_dir: Path, check: bool = False, layouts_path: Path = DEFAULT_LAYOUTS) -> int:
+    samples = discover_inputs(input_dir, layouts_path)
     store = AnnotationStore(output_dir, samples)
     if check:
         report = write_outputs(store)

@@ -3,10 +3,11 @@
   "errors": [],
   "samples": {
     "pending": 0,
-    "complete": 3,
+    "complete": 4,
     "skipped": 0
   },
   "profiles": [
+    "driving_license",
     "uzbekistan_id_card_back",
     "uzbekistan_id_card_front",
     "uzbekistan_passport"

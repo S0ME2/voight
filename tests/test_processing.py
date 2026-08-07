@@ -33,7 +33,7 @@ def test_roi_assignment_and_crop():
     assert not unassigned
 
 
-def test_document_parsers_keep_validated_behavior():
+def test_document_parser_returns_raw_driving_license_text():
     extracted, _ = parse_fields(
         {
             "birth_place_and_date": [
@@ -43,10 +43,10 @@ def test_document_parsers_keep_validated_behavior():
             "license_number": [{"text": "5. AG2742395", "x1": 0, "center_y": 0}],
         }
     )
-    assert extracted["birth_place"] == "TOSHLOQ"
-    assert extracted["birth_date"] == "19.10.2005"
-    assert extracted["personal_id"] == "12345678901234"
-    assert extracted["license_number"] == "AG2742395"
+    assert extracted["birth_place"] == "3. TOSHLOQ 19.10.2005"
+    assert extracted["birth_date"] is None
+    assert extracted["personal_id"] == "4d. 12345678901234"
+    assert extracted["license_number"] == "5. AG2742395"
     lines = reconstruct(
         [
             {

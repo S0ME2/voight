@@ -4,7 +4,7 @@
 
 `models.py` is the only place where the three heavy models are constructed and retained. `PRELOAD=true` initializes all models during application startup. With `PRELOAD=false`, each required model is initialized on its first use and then reused.
 
-`imaging.py`, `ocr.py`, and `roi.py` contain generic mechanics shared by pipelines. `documents/mrz.py` is the common MRZ localization and reconstruction implementation, configured by an ID-card or passport profile. `documents/driving_license.py` contains the alignment and ROI pipeline; `driving_license_fields.py` contains field-specific rules and parsing.
+`imaging.py`, `ocr.py`, and `roi.py` contain generic mechanics shared by pipelines. `documents/mrz.py` is the common MRZ localization and reconstruction implementation, configured by an ID-card or passport profile. `documents/driving_license.py` contains the alignment and ROI pipeline; `driving_license_fields.py` preserves recognized driving-licence text for downstream parsing.
 
 The Uzbekistan passport profile derives its page quadrilateral from the detected
 MRZ and an MRZ-relative page annotation. It does not use the submitted image

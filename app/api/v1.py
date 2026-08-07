@@ -144,9 +144,29 @@ def _single(response: OcrBatchResponse) -> OcrResponse:
 
 
 def _driving_field_results(values: dict, report: dict) -> dict[str, FieldResult]:
-    source_names = {"birth_place": "birth_place_and_date", "birth_date": "birth_place_and_date"}
+    source_names = {
+        "surname": ("surname",),
+        "given_names": ("given_names", "name"),
+        "birth_place": ("birth_place_and_date", "place_of_birth"),
+        "birth_date": ("date_of_birth",),
+        "issue_date": ("issue_date", "date_of_issue"),
+        "expiry_date": ("expiry_date", "date_of_expiry"),
+        "issued_place": ("issued_place", "place_of_issue"),
+        "personal_id": ("personal_id", "id_number"),
+        "license_number": ("license_number", "id_number_2"),
+        "address": ("address", "place_of_living"),
+        "categories": ("categories", "types"),
+        "serial_number": ("serial_number",),
+    }
+
+    def evidence(name: str, kind: str):
+        for source in source_names.get(name, (name,)):
+            if source in report[kind]:
+                return report[kind][source]
+        return [] if kind == "field_raw_text" else None
+
     return {
-        name: FieldResult(value=value, raw_text=report["field_raw_text"].get(source_names.get(name, name), []), confidence=report["field_confidences"].get(source_names.get(name, name)), bounding_box=report["field_bounding_boxes"].get(source_names.get(name, name)), region="image")
+        name: FieldResult(value=value, raw_text=evidence(name, "field_raw_text"), confidence=evidence(name, "field_confidences"), bounding_box=evidence(name, "field_bounding_boxes"), region="image")
         for name, value in values.items()
     }
 

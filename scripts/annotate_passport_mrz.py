@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Detect a passport MRZ and write an overlay for page-corner annotation."""
+"""Diagnostic MRZ overlay helper; use scripts/annotate.py for annotations."""
 
 from __future__ import annotations
 

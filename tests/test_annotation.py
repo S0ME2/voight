@@ -80,6 +80,21 @@ class AnnotationTests(unittest.TestCase):
             self.assertEqual(set(resumed.data["samples"]), {item.key for item in discover_inputs(root)})
             self.assertEqual(store.path, resumed.path)
 
+    def test_json_layout_defines_driving_license_annotation(self):
+        from tempfile import TemporaryDirectory
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            image(root / "driving_licenses" / "one.jpg")
+            layouts = root / "layouts.json"
+            layouts.write_text(json.dumps({"layouts": [{
+                "input_directory": "driving_licenses", "document_type": "driving_license", "layout": "driving_license",
+                "annotation_mode": "canonical", "canonical_size": {"width": 1000, "height": 630}, "fields": ["license_number"]
+            }]}), encoding="utf-8")
+            sample = discover_inputs(root, layouts)[0]
+            self.assertEqual(sample.annotation_mode, "canonical")
+            store = AnnotationStore(root / "output", [sample])
+            self.assertEqual(store.sample(sample.key)["coordinate_space"], "canonical")
+
     def test_check_rejects_malformed_annotation(self):
         from tempfile import TemporaryDirectory
         with TemporaryDirectory() as directory:

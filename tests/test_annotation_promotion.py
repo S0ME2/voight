@@ -24,3 +24,7 @@ class AnnotationPromotionTests(unittest.TestCase):
             self.assertIn("sex", passport["regions"]["data_page"]["field_rois"])
             self.assertNotIn("sec", passport["regions"]["data_page"]["field_rois"])
             self.assertIn("nationality", passport["regions"]["data_page"]["field_rois"])
+            state = json.loads((ROOT / "annotations/annotation_state.json").read_text(encoding="utf-8"))
+            licence = state["samples"]["driving_license:test_license_canonical.jpg"]
+            self.assertEqual(json.loads((destination.parent / "driving_license" / "data_crop.json").read_text())["data_crop"], licence["data_crop"])
+            self.assertEqual(json.loads((destination.parent / "driving_license" / "field_rois_crop.json").read_text()), licence["fields"])
