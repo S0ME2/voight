@@ -75,11 +75,9 @@ def test_runtime_configuration_with_stubs(
     )
     models = Models(settings)
     loaded = []
-    models.ocr = lambda: loaded.append("ocr")
-    models.mrz_scanner = lambda: loaded.append("mrz")
-    models.document_aligner = lambda: loaded.append("aligner")
+    models.profile_batch_runner = lambda: loaded.append("v1_batch_models")
     models.preload()
-    assert loaded == ["ocr", "mrz", "aligner"]
+    assert loaded == ["v1_batch_models"]
     writer = create_artifact_run(settings.artifacts, "test", "input.png")
     assert not writer.directory.exists()
     assert detect_file_extension(b"\x89PNG\r\n\x1a\nanything") == "png"

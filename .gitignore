@@ -11,6 +11,8 @@ dist/
 logs/
 logs-from-container/
 outputs/
+complexity/results/
+DELETE_ME/
 code.zip
 .coverage
 .coverage.*

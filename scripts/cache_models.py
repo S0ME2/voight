@@ -6,9 +6,6 @@ from app.models import Models
 
 def main() -> None:
     models = Models(Settings.from_env())
-    models.ocr()
-    models.mrz_scanner()
-    models.document_aligner()
     models.profile_batch_runner()
 
 

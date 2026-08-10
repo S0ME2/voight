@@ -7,6 +7,7 @@ from app.inference.batch import (
     ProfileBatchItem,
     ProfileBatchRunner,
     QueueFullError,
+    ResourceExhaustedError,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "ProfileBatchItem",
     "ProfileBatchRunner",
     "QueueFullError",
+    "ResourceExhaustedError",
 ]

@@ -72,6 +72,8 @@ class RuntimeSettings:
     localization_batch_size: int = 4
     text_detection_batch_size: int = 8
     text_recognition_batch_size: int = 32
+    text_recognition_processes: int = 1
+    gpu_id: int = 0
 
 
 @dataclass(frozen=True)
@@ -106,6 +108,10 @@ class Settings:
             raise ValueError("OCR_DEVICE must be 'cpu' or 'gpu'")
         if self.runtime.target != self.ocr.device:
             raise ValueError("RUNTIME_TARGET and OCR_DEVICE must select the same runtime")
+        if self.runtime.gpu_id < 0:
+            raise ValueError("GPU_ID must be zero or greater")
+        if self.runtime.target != "cpu" and self.runtime.text_recognition_processes != 1:
+            raise ValueError("TEXT_RECOGNITION_PROCESSES may exceed one only on CPU")
 
         positive = {
             "CPU_THREADS": self.runtime.cpu_threads,
@@ -113,6 +119,7 @@ class Settings:
             "LOCALIZATION_BATCH_SIZE": self.runtime.localization_batch_size,
             "TEXT_DETECTION_BATCH_SIZE": self.runtime.text_detection_batch_size,
             "TEXT_RECOGNITION_BATCH_SIZE": self.runtime.text_recognition_batch_size,
+            "TEXT_RECOGNITION_PROCESSES": self.runtime.text_recognition_processes,
             "BATCH_MAX_FILES": self.batch.max_files,
             "BATCH_MAX_FILE_BYTES": self.batch.max_file_bytes,
             "BATCH_MAX_ARCHIVE_UNCOMPRESSED_BYTES": self.batch.max_archive_uncompressed_bytes,
@@ -136,7 +143,9 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        device = os.getenv("OCR_DEVICE", "cpu").strip().lower()
+        legacy_device = os.getenv("OCR_DEVICE")
+        target = os.getenv("RUNTIME_TARGET", legacy_device or "cpu").strip().lower()
+        device = (legacy_device or target).strip().lower()
         settings = cls(
             preload=_bool("PRELOAD", False),
             artifacts=ArtifactSettings(
@@ -175,7 +184,7 @@ class Settings:
                 ),
             ),
             runtime=RuntimeSettings(
-                target=os.getenv("RUNTIME_TARGET", device).strip().lower(),
+                target=target,
                 cpu_threads=_positive_int("CPU_THREADS", 4),
                 queue_limit=_positive_int("REQUEST_QUEUE_LIMIT", 32),
                 localization_batch_size=_positive_int("LOCALIZATION_BATCH_SIZE", 4),
@@ -183,6 +192,10 @@ class Settings:
                 text_recognition_batch_size=_positive_int(
                     "TEXT_RECOGNITION_BATCH_SIZE", 32
                 ),
+                text_recognition_processes=_positive_int(
+                    "TEXT_RECOGNITION_PROCESSES", 1
+                ),
+                gpu_id=int(os.getenv("GPU_ID", "0")),
             ),
             models=ModelSettings(_optional_path("MODEL_DIR")),
             profiles=ProfileSettings(

@@ -15,6 +15,7 @@ class OcrBatchResponse(BaseModel):
     failed: int = Field(ge=0)
     total_seconds: float = Field(ge=0)
     items: list[BatchItemResult]
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def counts_match_items(self):

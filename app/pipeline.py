@@ -220,6 +220,54 @@ def prepare_profile(
     )
     timings["document_detection_seconds"] = time.perf_counter() - started
 
+    return prepare_profile_from_detection(
+        image,
+        profile,
+        corners,
+        artifacts,
+        canonical_width=canonical_width,
+        canonical_height=canonical_height,
+        padding=padding,
+        padded=padded,
+        padded_corners=padded_corners,
+        document_confidence=document_confidence,
+        started_total=started_total,
+        timings=timings,
+    )
+
+
+def prepare_profile_from_detection(
+    image: np.ndarray,
+    profile: RegionProfile,
+    corners: np.ndarray,
+    artifacts: ArtifactWriter,
+    *,
+    canonical_width: int,
+    canonical_height: int,
+    padding: int,
+    padded: np.ndarray | None = None,
+    padded_corners: np.ndarray | None = None,
+    document_confidence: dict[str, Any] | None = None,
+    started_total: float | None = None,
+    timings: dict[str, Any] | None = None,
+) -> PreparedProfile:
+    """Prepare one profile from localization already produced by a batch model."""
+    started_total = started_total if started_total is not None else time.perf_counter()
+    timings = dict(timings or {})
+    corners = np.asarray(corners, dtype=np.float32).reshape(4, 2)
+    if padded is None:
+        padded = cv2.copyMakeBorder(
+            image,
+            padding,
+            padding,
+            padding,
+            padding,
+            cv2.BORDER_CONSTANT,
+            value=(0, 0, 0),
+        )
+    if padded_corners is None:
+        padded_corners = corners + padding
+
     started = time.perf_counter()
     canonical = rectify_document(image, corners, canonical_width, canonical_height)
     timings["canonicalization_seconds"] = time.perf_counter() - started
@@ -254,11 +302,12 @@ def complete_profile(
     validate_fields: Callable[[dict[str, Any]], list[str]],
     *,
     min_overlap: float,
-    ocr_seconds: float,
+    ocr_seconds: float | None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Restore batched OCR tokens and finish one profile independently."""
     timings = prepared.timings
-    timings["ocr_seconds"] = ocr_seconds
+    if ocr_seconds is not None:
+        timings["ocr_seconds"] = ocr_seconds
     tokens = add_canonical_boxes(
         tokens,
         prepared.crop_bounds,

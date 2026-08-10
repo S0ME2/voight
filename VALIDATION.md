@@ -18,7 +18,7 @@ For the V100 server only, preserve that schema and use these commands:
 
 ```bash
 cp .env.example .env
-# Set COMPOSE_PROFILES=gpu, RUNTIME_TARGET=gpu, and OCR_DEVICE=gpu in .env.
+# Set COMPOSE_PROFILES=gpu, RUNTIME_TARGET=gpu, and GPU_ID=0 in .env.
 make docker-gpu-build
 make docker-gpu-test
 docker compose --env-file .env --profile gpu up -d gpu

@@ -16,21 +16,23 @@ FROM cpu-deps AS cpu-assets
 COPY app/ /app/app/
 COPY config/ /app/config/
 COPY scripts/cache_models.py /app/scripts/cache_models.py
-ENV PYTHONPATH=/app RUNTIME_TARGET=cpu OCR_DEVICE=cpu PRELOAD=false MODEL_DIR=/home/voight/.paddlex
+ENV PYTHONPATH=/app RUNTIME_TARGET=cpu PRELOAD=false MODEL_DIR=/home/voight/.paddlex
 RUN mkdir -p "$MODEL_DIR" && python scripts/cache_models.py
 
 FROM gpu-deps AS gpu-assets
 COPY app/ /app/app/
 COPY config/ /app/config/
 COPY scripts/cache_models.py /app/scripts/cache_models.py
-ENV PYTHONPATH=/app RUNTIME_TARGET=gpu OCR_DEVICE=gpu PRELOAD=false MODEL_DIR=/home/voight/.paddlex
+# Cache assets without requiring a GPU during docker build; runtime selection is
+# applied only in the final image.
+ENV PYTHONPATH=/app RUNTIME_TARGET=cpu PRELOAD=false MODEL_DIR=/home/voight/.paddlex
 RUN mkdir -p "$MODEL_DIR" && python scripts/cache_models.py
 
 FROM cpu-assets AS cpu
 COPY --chown=voight:voight app/ /app/app/
 COPY --chown=voight:voight config/ /app/config/
 USER voight
-ENV RUNTIME_TARGET=cpu OCR_DEVICE=cpu PRELOAD=false MODEL_DIR=/home/voight/.paddlex
+ENV RUNTIME_TARGET=cpu PRELOAD=false MODEL_DIR=/home/voight/.paddlex
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD python -c "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/v1/health/ready').read()"
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
@@ -45,7 +47,7 @@ FROM gpu-assets AS gpu
 COPY --chown=voight:voight app/ /app/app/
 COPY --chown=voight:voight config/ /app/config/
 USER voight
-ENV RUNTIME_TARGET=gpu OCR_DEVICE=gpu PRELOAD=false MODEL_DIR=/home/voight/.paddlex
+ENV RUNTIME_TARGET=gpu GPU_ID=0 PRELOAD=false MODEL_DIR=/home/voight/.paddlex
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD python -c "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/v1/health/ready').read()"
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

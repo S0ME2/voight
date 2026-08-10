@@ -7,7 +7,6 @@ services:
     env_file: .env
     environment:
       RUNTIME_TARGET: cpu
-      OCR_DEVICE: cpu
     ports: ["${VOIGHT_PORT:-8000}:8000"]
     volumes: ["voight-artifacts:/app/logs"]
 
@@ -19,11 +18,12 @@ services:
     env_file: .env
     environment:
       RUNTIME_TARGET: gpu
-      OCR_DEVICE: gpu
+      GPU_ID: "${GPU_ID:-0}"
       REQUEST_QUEUE_LIMIT: "${REQUEST_QUEUE_LIMIT:-8}"
       LOCALIZATION_BATCH_SIZE: "${LOCALIZATION_BATCH_SIZE:-2}"
       TEXT_DETECTION_BATCH_SIZE: "${TEXT_DETECTION_BATCH_SIZE:-4}"
       TEXT_RECOGNITION_BATCH_SIZE: "${TEXT_RECOGNITION_BATCH_SIZE:-8}"
+      TEXT_RECOGNITION_PROCESSES: "1"
     ports: ["${VOIGHT_PORT:-8000}:8000"]
     volumes: ["voight-artifacts:/app/logs"]
     gpus: all

@@ -36,13 +36,11 @@ from app.documents.identity import (
     _required_warnings,
 )
 from app.documents.mrz import ID_CARD, PASSPORT, parse as parse_mrz
-from app.documents.passport_localization import detect_passport_page_padded
 from app.documents.profiles import load_document_profile
-from app.inference import ProfileBatchItem, QueueFullError
+from app.inference import ProfileBatchItem, QueueFullError, ResourceExhaustedError
 from app.models import Models
 from app.pipeline import RegionProfile, load_region_profile
 from app.uploads import UploadedDocument, document_from_bytes, image_from_document
-from app.workflows import run_document_mrz
 
 
 @dataclass(frozen=True)
@@ -171,15 +169,6 @@ def _driving_field_results(values: dict, report: dict) -> dict[str, FieldResult]
     }
 
 
-def _mrz_result(upload, document_type: DocumentType, models: Models, settings: Settings, artifacts):
-    profile = PASSPORT if document_type == DocumentType.PASSPORT else ID_CARD
-    try:
-        output = run_document_mrz(upload, "v1_mrz", profile, models, settings, artifacts=artifacts, save_input_artifacts=False)
-    except Exception:
-        return parse_mrz("", document_type.value)
-    return parse_mrz(str(output.result), document_type.value)
-
-
 def _run_batch(inputs: list[LogicalInput], models: Models, settings: Settings) -> OcrBatchResponse:
     if not inputs:
         raise _error(ErrorCode.INVALID_UPLOAD, "At least one image is required")
@@ -189,10 +178,7 @@ def _run_batch(inputs: list[LogicalInput], models: Models, settings: Settings) -
     artifacts = create_batch_artifact_run(settings.artifacts, "v1")
     jobs: list[ProfileBatchItem] = []
     owners: list[tuple[int, str, dict, object]] = []
-    mrz_inputs = {}
     item_errors: dict[int, ErrorResult] = {}
-    aligner = None
-    mrz_detector = None
     for index, logical in enumerate(inputs):
         try:
             decoded_files = tuple(image_from_document(file) for file in logical.files)
@@ -213,19 +199,43 @@ def _run_batch(inputs: list[LogicalInput], models: Models, settings: Settings) -
             writer = create_child_artifact_run(artifacts, len(jobs), file.filename)
             save_input(writer, file.data, file.filename, file.content_type, file.extension, image, source_filename=file.source_filename, archive_path=file.archive_path)
             item_id = f"{index}:{region}"
-            if logical.input.document_type == DocumentType.PASSPORT:
-                mrz_detector = mrz_detector or models.mrz_scanner()
-                detector = lambda padded, document_profile=document_profile, model=mrz_detector: detect_passport_page_padded(padded, document_profile, model, settings.driving_license.aligner_padding)
-            else:
-                aligner = aligner or models.document_aligner()
-                detector = lambda padded, model=aligner: model(img=padded, do_center_crop=False)
-            jobs.append(ProfileBatchItem(item_id, image, profile, detector, parser, validator, writer, width, height, settings.driving_license.aligner_padding, settings.driving_license.min_overlap_ratio))
+            kind = "mrz" if logical.input.document_type == DocumentType.PASSPORT else "docaligner"
+            mrz_profile = (
+                PASSPORT
+                if logical.input.document_type == DocumentType.PASSPORT
+                else ID_CARD
+                if logical.input.document_type == DocumentType.ID_CARD and region == "back"
+                else None
+            )
+            jobs.append(
+                ProfileBatchItem(
+                    item_id=item_id,
+                    image=image,
+                    profile=profile,
+                    localization_kind=kind,
+                    parse_fields=parser,
+                    validate_fields=validator,
+                    artifacts=writer,
+                    canonical_width=width,
+                    canonical_height=height,
+                    padding=settings.driving_license.aligner_padding,
+                    min_overlap=settings.driving_license.min_overlap_ratio,
+                    passport_page_corners=(
+                        document_profile["document_localization"]["page_corners_relative_to_mrz_width"]
+                        if logical.input.document_type == DocumentType.PASSPORT
+                        else None
+                    ),
+                    mrz_profile=mrz_profile,
+                    probe_mrz=logical.input.document_type == DocumentType.ID_CARD,
+                )
+            )
             owners.append((index, region, document_profile, logical.input.document_type))
-            mrz_inputs[index, region] = (file, writer)
     try:
-        outcomes, _ = models.profile_batch_runner().run(jobs) if jobs else ([], {})
+        outcomes, diagnostics = models.profile_batch_runner().run(jobs) if jobs else ([], {})
     except QueueFullError as exc:
         raise _error(ErrorCode.QUEUE_FULL, str(exc), 503) from exc
+    except ResourceExhaustedError as exc:
+        raise _error(ErrorCode.RESOURCE_EXHAUSTED, str(exc), 503) from exc
     grouped: dict[int, dict[str, tuple[object, dict | None]]] = {}
     for owner, outcome in zip(owners, outcomes):
         index, region, profile, kind = owner
@@ -236,6 +246,21 @@ def _run_batch(inputs: list[LogicalInput], models: Models, settings: Settings) -
             items.append(_item_error(index, logical.input, item_errors[index]))
             continue
         regions = grouped.get(index, {})
+        if logical.input.document_type == DocumentType.ID_CARD:
+            front = regions.get("front", (None, None))[0]
+            back = regions.get("back", (None, None))[0]
+            if front and back and front.mrz_detected and not back.mrz_detected:
+                items.append(
+                    _item_error(
+                        index,
+                        logical.input,
+                        ErrorResult(
+                            code=ErrorCode.INVALID_DOCUMENT,
+                            detail="ID-card front and back appear to be swapped",
+                        ),
+                    )
+                )
+                continue
         failed = next((outcome.error for outcome, _ in regions.values() if outcome.error), None)
         if failed:
             code = failed.error.code if isinstance(failed, DocumentPipelineError) else ErrorCode.INVALID_DOCUMENT
@@ -255,8 +280,7 @@ def _run_batch(inputs: list[LogicalInput], models: Models, settings: Settings) -
                 fields.update(_field_results(profile, region, values, report))
                 warnings.extend(report["validation_warnings"])
             mrz_region = "data_page" if logical.input.document_type == DocumentType.PASSPORT else "back"
-            upload, writer = mrz_inputs[index, mrz_region]
-            mrz = _mrz_result(upload, logical.input.document_type, models, settings, writer)
+            mrz = parse_mrz(regions[mrz_region][0].mrz_text or "", logical.input.document_type.value)
             mapping = {"surname": "surname", "name": "given_names", "date_of_birth": "date_of_birth", "sex": "sex", "date_of_expiry": "date_of_expiry", "passport_number" if logical.input.document_type == DocumentType.PASSPORT else "card_number": "document_number"}
             if logical.input.document_type == DocumentType.ID_CARD:
                 mapping.update({"pinfl": "pinfl", "citizenship": "nationality"})
@@ -265,9 +289,15 @@ def _run_batch(inputs: list[LogicalInput], models: Models, settings: Settings) -
                 warnings.append("MRZ was not found" + (" on ID-card back" if logical.input.document_type == DocumentType.ID_CARD else ""))
             elif any(validation.status.value == "failed" for validation in mrz.validations):
                 warnings.append("MRZ check-digit validation failed")
-            result = DocumentResult(document_type=logical.input.document_type, layout=profile["layout"], fields=fields, document_confidence=_document_confidence([outcome.result[1] for outcome, _ in regions.values()]), mrz=mrz, validations=validations, warnings=warnings, timings=TimingResult(total_seconds=max((outcome.result[1]["timings"]["total_seconds"] for outcome, _ in regions.values()), default=0.0)))
+            reports = [outcome.result[1] for outcome, _ in regions.values()]
+            stages = {
+                f"{region}_{name}": value
+                for region, (outcome, _) in regions.items()
+                for name, value in outcome.result[1]["timings"].items()
+            }
+            result = DocumentResult(document_type=logical.input.document_type, layout=profile["layout"], fields=fields, document_confidence=_document_confidence(reports), mrz=mrz, validations=validations, warnings=warnings, timings=TimingResult(total_seconds=max((report["timings"]["total_seconds"] for report in reports), default=0.0), stages=stages))
         items.append(BatchItemResult(index=index, input=logical.input, success=True, result=result))
-    return OcrBatchResponse(total=len(items), succeeded=sum(item.success for item in items), failed=sum(not item.success for item in items), total_seconds=time.perf_counter() - started, items=items)
+    return OcrBatchResponse(total=len(items), succeeded=sum(item.success for item in items), failed=sum(not item.success for item in items), total_seconds=time.perf_counter() - started, items=items, diagnostics=diagnostics)
 
 
 def create_v1_router(settings: Settings, models: Models) -> APIRouter:
@@ -313,7 +343,8 @@ def create_v1_router(settings: Settings, models: Models) -> APIRouter:
     async def ready() -> dict[str, str]:
         try:
             settings.validate_startup()
-        except ValueError as exc:
+            models.readiness()
+        except (RuntimeError, ValueError) as exc:
             raise _error(ErrorCode.PROFILE_UNAVAILABLE, str(exc), 503) from exc
         return {"status": "ready"}
 

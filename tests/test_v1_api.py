@@ -1,20 +1,29 @@
 from dataclasses import replace
 from io import BytesIO
+import os
 import unittest
 import zipfile
 from unittest.mock import patch
 
 import cv2
 import numpy as np
+from fastapi.testclient import TestClient
+from fastapi import HTTPException
 
 from app.api.v1 import _driving_field_results, _id_archive, _image_inputs, _run_batch, _safe_entries
 from app.artifacts import ArtifactSettings
 from app.config import Settings
 from app.contracts import DocumentType, ErrorCode
-from app.inference.batch import ProfileBatchOutcome
+from app.inference.batch import ProfileBatchOutcome, ResourceExhaustedError
+
+# The checked-in Docker example names an image-only model directory.  Keep this
+# host test independent of a developer's .env before importing app.main.
+os.environ["MODEL_DIR"] = ""
 from app.main import create_app
 from app.uploads import document_from_bytes
-from app.workflows import WorkflowResult
+
+PASSPORT_MRZ = "P<UZBCITIZEN<<JOHN<<<<<<<<<<<<<<<<<<<<<<<<<<\n0000000000UZB0000000M00000000000000000000000"
+ID_MRZ = "I<UZBAD6632763841103741390036<\n7403116F3403277UZB<<<<<<<<<<<8\nEGAMOVA<<IRODA<<<<<<<<<<<<<<<<"
 
 
 def image_bytes() -> bytes:
@@ -35,10 +44,12 @@ class Runner:
     def __init__(self):
         self.calls = 0
         self.job_count = 0
+        self.job_counts = []
 
     def run(self, jobs):
         self.calls += 1
         self.job_count = len(jobs)
+        self.job_counts.append(len(jobs))
         outcomes = []
         for job in jobs:
             names = job.profile.field_rois
@@ -49,8 +60,15 @@ class Runner:
                 "validation_warnings": [],
                 "timings": {"total_seconds": 0.01},
             }
-            outcomes.append(ProfileBatchOutcome(job.item_id, result=({name: None for name in names}, report)))
-        return outcomes, {}
+            outcomes.append(
+                ProfileBatchOutcome(
+                    job.item_id,
+                    result=({name: None for name in names}, report),
+                    mrz_text=PASSPORT_MRZ if job.localization_kind == "mrz" else ID_MRZ if job.mrz_profile else None,
+                    mrz_detected=job.localization_kind == "mrz" or job.probe_mrz,
+                )
+            )
+        return outcomes, {"text_detection": {"model_call_count": 1}}
 
 
 class Models:
@@ -65,6 +83,12 @@ class Models:
 
     def profile_batch_runner(self):
         return self.runner
+
+    def preload(self):
+        return None
+
+    def readiness(self):
+        return {"target": "cpu"}
 
 
 class V1TransportTests(unittest.TestCase):
@@ -131,6 +155,15 @@ class V1TransportTests(unittest.TestCase):
         self.assertTrue(response.items[0].success)
         self.assertEqual(ErrorCode.INVALID_UPLOAD, response.items[1].error.code)
 
+    def test_resource_exhaustion_is_a_request_error_not_a_corrupt_document(self):
+        models = Models()
+        models.runner.run = lambda _jobs: (_ for _ in ()).throw(ResourceExhaustedError("text detection resource failure"))
+        inputs = _image_inputs(DocumentType.PASSPORT, [document_from_bytes(image_bytes(), "passport.jpg")])
+        with self.assertRaises(HTTPException) as caught:
+            _run_batch(inputs, models, self.settings)
+        self.assertEqual(503, caught.exception.status_code)
+        self.assertEqual(ErrorCode.RESOURCE_EXHAUSTED, caught.exception.detail["code"])
+
     def test_all_frozen_routes_are_declared_with_contract_schemas(self):
         schema = create_app(self.settings).openapi()
         paths = schema["paths"]
@@ -156,10 +189,35 @@ class V1TransportTests(unittest.TestCase):
     def test_identity_response_includes_mrz(self):
         models = Models()
         inputs = _image_inputs(DocumentType.PASSPORT, [document_from_bytes(image_bytes(), "passport.jpg")])
-        mrz = "P<UZBCITIZEN<<JOHN<<<<<<<<<<<<<<<<<<<<<<<<<<\n0000000000UZB0000000M00000000000000000000000"
-        with patch("app.api.v1.run_document_mrz", return_value=WorkflowResult(mrz, {})):
-            response = _run_batch(inputs, models, self.settings)
+        response = _run_batch(inputs, models, self.settings)
         self.assertEqual(["P<UZBCITIZEN<<JOHN<<<<<<<<<<<<<<<<<<<<<<<<<<", "0000000000UZB0000000M00000000000000000000000"], response.items[0].result.mrz.raw_lines)
+
+    def test_all_single_and_batch_routes_use_the_same_coordinator(self):
+        models = Models()
+        with patch("app.main.Models", return_value=models):
+            application = create_app(self.settings)
+        payload = image_bytes()
+        id_zip = archive(
+            {
+                "one/front.jpg": payload,
+                "one/back.jpg": payload,
+                "two/front.jpg": payload,
+                "two/back.jpg": payload,
+            }
+        )
+        with TestClient(application) as client:
+            responses = [
+                client.post("/v1/ocr/passport", files={"image": ("p.jpg", payload, "image/jpeg")}),
+                client.post("/v1/ocr/passport/batch", files=[("images", ("p1.jpg", payload, "image/jpeg")), ("images", ("p2.jpg", payload, "image/jpeg"))]),
+                client.post("/v1/ocr/id-card", files={"front": ("front.jpg", payload, "image/jpeg"), "back": ("back.jpg", payload, "image/jpeg")}),
+                client.post("/v1/ocr/id-card/batch", files={"archive": ("ids.zip", id_zip, "application/zip")}),
+                client.post("/v1/ocr/driving-license", files={"image": ("d.jpg", payload, "image/jpeg")}),
+                client.post("/v1/ocr/driving-license/batch", files=[("images", ("d1.jpg", payload, "image/jpeg")), ("images", ("d2.jpg", payload, "image/jpeg"))]),
+            ]
+        self.assertEqual([200] * 6, [response.status_code for response in responses])
+        self.assertEqual(6, models.runner.calls)
+        self.assertEqual([1, 2, 2, 4, 1, 2], models.runner.job_counts)
+        self.assertEqual(1, responses[1].json()["diagnostics"]["text_detection"]["model_call_count"])
 
 
 if __name__ == "__main__":

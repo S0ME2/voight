@@ -28,9 +28,12 @@ class Models:
         self._ocr: Any | None = None
         self._text_detector: Any | None = None
         self._text_recognizer: Any | None = None
+        self._process_text_recognizer: Any | None = None
         self._profile_batch_runner: Any | None = None
         self._mrz_scanner: Any | None = None
         self._document_aligner: Any | None = None
+        self._mrz_localizer: Any | None = None
+        self._document_localizer: Any | None = None
         self._load_seconds: dict[str, float] = {}
 
     def _get_or_load(
@@ -51,7 +54,7 @@ class Models:
         def load() -> Any:
             from paddleocr import PaddleOCR
 
-            return PaddleOCR(**OCR_MODEL_CONFIG, device=self.settings.ocr.device)
+            return PaddleOCR(**OCR_MODEL_CONFIG, device=self._paddle_device())
 
         return self._get_or_load("_ocr", "ocr", load)
 
@@ -62,6 +65,9 @@ class Models:
             return MRZScanner(
                 model_type=ModelType.detection,
                 detection_cfg=self.settings.mrz.scanner_config,
+                backend=self._onnx_backend(),
+                gpu_id=self.settings.runtime.gpu_id,
+                session_option=self._onnx_session_options(),
             )
 
         return self._get_or_load("_mrz_scanner", "mrz_scanner", load)
@@ -72,40 +78,42 @@ class Models:
 
             options = dict(
                 model_name=TEXT_DETECTION_MODEL_NAME,
-                device=self.settings.ocr.device,
-                batch_size=self.settings.runtime.text_detection_batch_size,
+                model_dir=self._paddle_model_dir(TEXT_DETECTION_MODEL_NAME),
+                device=self._paddle_device(),
                 thresh=OCR_PREDICT_CONFIG["text_det_thresh"],
                 box_thresh=OCR_PREDICT_CONFIG["text_det_box_thresh"],
                 unclip_ratio=OCR_PREDICT_CONFIG["text_det_unclip_ratio"],
             )
-            try:
-                return TextDetection(**options)
-            except ValueError as error:
-                if "Unknown argument: batch_size" not in str(error):
-                    raise
-                options.pop("batch_size")
-                return TextDetection(**options)
+            return TextDetection(**options)
 
         return self._get_or_load("_text_detector", "text_detector", load)
 
     def text_recognizer(self) -> Any:
-        def load() -> Any:
-            from paddleocr import TextRecognition
+        return self._get_or_load(
+            "_text_recognizer", "text_recognizer", self._load_text_recognizer
+        )
 
-            options = dict(
-                model_name=TEXT_RECOGNITION_MODEL_NAME,
-                device=self.settings.ocr.device,
-                batch_size=self.settings.runtime.text_recognition_batch_size,
+    def _load_text_recognizer(self) -> Any:
+        from paddleocr import TextRecognition
+
+        return TextRecognition(
+            model_name=TEXT_RECOGNITION_MODEL_NAME,
+            model_dir=self._paddle_model_dir(TEXT_RECOGNITION_MODEL_NAME),
+            device=self._paddle_device(),
+            cpu_threads=self.settings.runtime.cpu_threads,
+        )
+
+    def process_text_recognizer(self) -> Any:
+        if self._process_text_recognizer is None:
+            from app.inference.recognition_workers import ProcessTextRecognizer
+
+            runtime = self.settings.runtime
+            self._process_text_recognizer = ProcessTextRecognizer(
+                model_dir=self._paddle_model_dir(TEXT_RECOGNITION_MODEL_NAME),
+                processes=runtime.text_recognition_processes,
+                cpu_threads=runtime.cpu_threads,
             )
-            try:
-                return TextRecognition(**options)
-            except ValueError as error:
-                if "Unknown argument: batch_size" not in str(error):
-                    raise
-                options.pop("batch_size")
-                return TextRecognition(**options)
-
-        return self._get_or_load("_text_recognizer", "text_recognizer", load)
+        return self._process_text_recognizer
 
     def profile_batch_runner(self) -> Any:
         """Return the one bounded inference coordinator owned by this process."""
@@ -116,10 +124,17 @@ class Models:
             self._profile_batch_runner = ProfileBatchRunner(
                 BatchedOcr(
                     self.text_detector(),
-                    self.text_recognizer(),
+                    self.process_text_recognizer()
+                    if runtime.text_recognition_processes > 1
+                    else self.text_recognizer(),
                     detection_batch_size=runtime.text_detection_batch_size,
                     recognition_batch_size=runtime.text_recognition_batch_size,
                 ),
+                {
+                    "docaligner": self.document_localizer(),
+                    "mrz": self.mrz_localizer(),
+                },
+                self.settings.mrz,
                 localization_batch_size=runtime.localization_batch_size,
                 max_items=self.settings.batch.max_files * 2,
                 queue_limit=runtime.queue_limit,
@@ -131,10 +146,45 @@ class Models:
             from docaligner import DocAligner
 
             return DocAligner(
-                model_cfg=self.settings.driving_license.aligner_model
+                model_cfg=self.settings.driving_license.aligner_model,
+                backend=self._onnx_backend(),
+                gpu_id=self.settings.runtime.gpu_id,
+                session_option=self._onnx_session_options(),
             )
 
         return self._get_or_load("_document_aligner", "document_aligner", load)
+
+    def mrz_localizer(self) -> Any:
+        def load() -> Any:
+            from app.inference.localization import MrzScannerBatchLocalizer
+
+            return MrzScannerBatchLocalizer(self.mrz_scanner())
+
+        return self._get_or_load("_mrz_localizer", "mrz_localizer", load)
+
+    def document_localizer(self) -> Any:
+        def load() -> Any:
+            from app.inference.localization import DocAlignerBatchLocalizer
+
+            return DocAlignerBatchLocalizer(self.document_aligner())
+
+        return self._get_or_load("_document_localizer", "document_localizer", load)
+
+    def _paddle_device(self) -> str:
+        runtime = self.settings.runtime
+        return "cpu" if runtime.target == "cpu" else f"gpu:{runtime.gpu_id}"
+
+    def _paddle_model_dir(self, name: str) -> str | None:
+        root = self.settings.models.directory
+        return None if root is None else str(root / "official_models" / name)
+
+    def _onnx_backend(self) -> Any:
+        from capybara import Backend
+
+        return Backend.cpu if self.settings.runtime.target == "cpu" else Backend.cuda
+
+    def _onnx_session_options(self) -> dict[str, int]:
+        return {"intra_op_num_threads": self.settings.runtime.cpu_threads}
 
     def is_loaded(self, name: str) -> bool:
         attributes = {
@@ -143,6 +193,8 @@ class Models:
             "text_recognizer": "_text_recognizer",
             "mrz_scanner": "_mrz_scanner",
             "document_aligner": "_document_aligner",
+            "mrz_localizer": "_mrz_localizer",
+            "document_localizer": "_document_localizer",
         }
         try:
             return getattr(self, attributes[name]) is not None
@@ -154,6 +206,19 @@ class Models:
 
     def preload(self) -> None:
         if self.settings.preload:
-            self.ocr()
-            self.mrz_scanner()
-            self.document_aligner()
+            self.profile_batch_runner()
+            if self.settings.runtime.text_recognition_processes > 1:
+                self.process_text_recognizer().start()
+
+    def close(self) -> None:
+        if self._process_text_recognizer is not None:
+            self._process_text_recognizer.close()
+
+    def readiness(self) -> dict[str, Any]:
+        from app.inference.backends import validate_runtime
+
+        runner = self.profile_batch_runner()
+        return validate_runtime(
+            self.settings,
+            localizers=tuple(runner.localizers.values()),
+        )

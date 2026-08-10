@@ -1,3 +1,5 @@
 --find-links https://www.paddlepaddle.org.cn/packages/stable/cu118/
 -r common.txt
+-r models.txt
+onnxruntime-gpu==1.22.0
 paddlepaddle-gpu==3.2.2

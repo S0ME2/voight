@@ -2,7 +2,14 @@
 
 `main.py` assembles settings, models, and the API router. `api/` handles HTTP uploads, batch expansion, response schemas, and request-level artifact organization. `workflows.py` owns operation selection, model acquisition, and calls into the document pipelines.
 
-`models.py` is the only place where the three heavy models are constructed and retained. `PRELOAD=true` initializes all models during application startup. With `PRELOAD=false`, each required model is initialized on its first use and then reused.
+`models.py` is the only place where heavy models are constructed and retained. `PRELOAD=true` initializes the two localization adapters plus the separate Paddle detector and recognizer used by `/v1`; it does not duplicate them with the combined legacy PaddleOCR object. With `PRELOAD=false`, each required model is initialized on its first use and then reused.
+
+The `/v1` coordinator groups MRZScanner and DocAligner localization jobs,
+constructs real ONNX tensors with dynamic batch dimension `N`, canonicalizes
+documents, batches all visible and MRZ crops through Paddle text detection,
+flattens detected lines into recognition batches, and restores tokens by stable
+item ID. Single routes call the same coordinator with one logical document.
+The unversioned migration routes retain their old sequential workflows.
 
 `imaging.py`, `ocr.py`, and `roi.py` contain generic mechanics shared by pipelines. `documents/mrz.py` is the common MRZ localization and reconstruction implementation, configured by an ID-card or passport profile. `documents/driving_license.py` contains the alignment and ROI pipeline; `driving_license_fields.py` preserves recognized driving-licence text for downstream parsing.
 
@@ -56,7 +63,7 @@ The multipart field is named `files`. It accepts:
 
 ZIP archives may contain nested folders. Directory entries, `__MACOSX`, `.DS_Store`, and `Thumbs.db` are ignored. Other non-image files are returned as failed batch items instead of aborting successful images.
 
-Batch processing is sequential because the heavy model objects are shared and are not assumed to be thread-safe. Upload order is preserved. ZIP entries preserve archive order. A failed image does not stop later images unless the process runs out of memory.
+Batch processing keeps localization and detection sequential because their heavy model objects are shared. Recognition uses one real tensor batch per microbatch. Set `TEXT_RECOGNITION_PROCESSES` above `1` on CPU to run those microbatches in separate spawned processes, each with its own Paddle runtime; the default `1` keeps the original single-process path. `CPU_THREADS` is divided between recognition workers. Upload order is preserved. ZIP entries preserve archive order. A failed image does not stop later images unless the process runs out of memory.
 
 ### Swagger behavior
 

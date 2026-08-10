@@ -24,6 +24,16 @@ and does not fail successful siblings. Request-wide validation errors use
 `OcrBatchResponse`. Their typed definitions are in `app.api.schemas` and
 `app.contracts`.
 
+`OcrBatchResponse.diagnostics` is additive evidence for the shared inference
+engine. It reports configured sizes, model-call counts, submitted sizes, known
+tensor batch sizes, model time, and failures separately for grouped
+localization, text detection, and line-crop recognition.
+
+`OcrBatchResponse.total_seconds` and each successful item's
+`timings.total_seconds` are end-to-end request wall times; in a shared batch
+they can overlap. Stage `model_seconds` is the shared model-call time and is
+reported only in batch diagnostics, never copied as exclusive per-item work.
+
 Confidence is always `{score, source, calibrated_probability}`. OCR and
 detection scores are source-labelled and default to
 `calibrated_probability: false`. Field boxes are normalized to `[0, 1]` within

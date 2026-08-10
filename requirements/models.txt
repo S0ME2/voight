@@ -1,0 +1,2 @@
+docaligner-docsaid==1.1.1
+mrzscanner-docsaid==1.0.7

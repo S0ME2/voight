@@ -19,7 +19,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         models.preload()
-        yield
+        try:
+            yield
+        finally:
+            if close := getattr(models, "close", None):
+                close()
 
     app = FastAPI(title="VoightKampff OCR API", version="0.3.0", lifespan=lifespan)
     app.include_router(create_router(settings, models))

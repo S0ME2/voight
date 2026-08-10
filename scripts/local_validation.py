@@ -117,13 +117,17 @@ def extraction_evidence() -> dict[str, Any]:
 
 
 class _Detector:
-    def predict(self, images: list[np.ndarray]) -> list[dict[str, Any]]:
+    def predict(self, *, input: list[np.ndarray], batch_size: int) -> list[dict[str, Any]]:
+        images = input
+        assert batch_size == len(images)
         polygon = np.float32([[5, 5], [35, 5], [35, 20], [5, 20]])
         return [{"dt_polys": [polygon]} for _ in images]
 
 
 class _Recognizer:
-    def predict(self, images: list[np.ndarray]) -> list[dict[str, Any]]:
+    def predict(self, *, input: list[np.ndarray], batch_size: int) -> list[dict[str, Any]]:
+        images = input
+        assert batch_size == len(images)
         return [{"rec_text": "OK", "rec_score": 0.9} for _ in images]
 
 
@@ -135,7 +139,7 @@ def _measure(batch_size: int, repeats: int) -> dict[str, Any]:
     for _ in range(repeats):
         result = ocr.run(samples)
     seconds = time.perf_counter() - started
-    return {"batch_size": batch_size, "repeats": repeats, "seconds": seconds, "throughput_samples_per_second": batch_size * repeats / seconds, "model_call_proof": {stage: result.diagnostics[stage]["actual_tensor_batch_sizes"] for stage in ("text_detection", "text_recognition")}, "max_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}
+    return {"batch_size": batch_size, "repeats": repeats, "seconds": seconds, "throughput_samples_per_second": batch_size * repeats / seconds, "model_call_proof": {stage: result.diagnostics[stage]["tensor_batch_sizes"] for stage in ("text_detection", "text_recognition")}, "max_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}
 
 
 def batch_evidence(sizes: list[int], repeats: int) -> dict[str, Any]:

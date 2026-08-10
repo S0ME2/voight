@@ -2,16 +2,15 @@
 name = "voight"
 version = "0.1.0"
 description = "Add your description here"
-readme = "README.md"
+readme = "app/README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "docaligner-docsaid==1.1.1",
     "dotenv==0.9.9",
     "fastapi==0.139.2",
     "fastmrz==2.1.2",
     "matplotlib==3.11.1",
-    "mrzscanner-docsaid==1.0.7",
     "numpy==2.3.5",
+    "onnxruntime==1.22.0; sys_platform == 'linux'",
     "paddleocr==3.7.0",
     "paddlepaddle==3.2.2",
     "python-multipart==0.0.32",

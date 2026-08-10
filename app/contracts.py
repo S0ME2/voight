@@ -116,6 +116,7 @@ class ErrorCode(str, Enum):
     PROFILE_UNAVAILABLE = "profile_unavailable"
     MODEL_UNAVAILABLE = "model_unavailable"
     QUEUE_FULL = "queue_full"
+    RESOURCE_EXHAUSTED = "resource_exhausted"
     PROCESSING_FAILED = "processing_failed"
 
 

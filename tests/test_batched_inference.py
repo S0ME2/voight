@@ -36,7 +36,9 @@ class DetectionStub:
         self.failing_marker = failing_marker
         self.batch_sizes = []
 
-    def predict(self, images):
+    def predict(self, *, input, batch_size):
+        images = input
+        assert batch_size == len(images)
         self.batch_sizes.append(len(images))
         markers = [int(image[0, 0, 0]) for image in images]
         if self.failing_marker in markers:
@@ -60,7 +62,9 @@ class RecognitionStub:
         self.failing_marker = failing_marker
         self.batch_sizes = []
 
-    def predict(self, images):
+    def predict(self, *, input, batch_size):
+        images = input
+        assert batch_size == len(images)
         self.batch_sizes.append(len(images))
         markers = [int(round(float(image.mean()))) for image in images]
         if self.failing_marker in markers:
@@ -68,6 +72,18 @@ class RecognitionStub:
         return [
             {"rec_text": f"value-{marker}", "rec_score": marker / 100}
             for marker in markers
+        ]
+
+
+class ProcessRecognitionStub:
+    def __init__(self):
+        self.chunks = []
+
+    def predict_chunks(self, chunks):
+        self.chunks = chunks
+        return [
+            ([{"rec_text": f"value-{int(round(float(image.mean())))}", "rec_score": 0.5} for image in chunk], 0.01)
+            for chunk in chunks
         ]
 
 
@@ -114,12 +130,14 @@ class BatchedOcrTests(unittest.TestCase):
         self.assertEqual([4, 2], recognizer.batch_sizes)
         self.assertIn(
             2,
-            result.diagnostics["text_detection"]["actual_tensor_batch_sizes"],
+            result.diagnostics["text_detection"]["tensor_batch_sizes"],
         )
         self.assertIn(
             4,
-            result.diagnostics["text_recognition"]["actual_tensor_batch_sizes"],
+            result.diagnostics["text_recognition"]["tensor_batch_sizes"],
         )
+        self.assertGreaterEqual(result.diagnostics["line_crop_seconds"], 0.0)
+        self.assertGreaterEqual(result.diagnostics["result_unpack_seconds"], 0.0)
 
         for sample in samples:
             single = BatchedOcr(
@@ -130,7 +148,7 @@ class BatchedOcrTests(unittest.TestCase):
             ).run([sample])
             self.assertEqual(single.tokens[sample.item_id], result.tokens[sample.item_id])
 
-    def test_batch_failure_splits_until_only_bad_item_fails(self):
+    def test_batch_failure_is_not_recursively_split(self):
         detector = DetectionStub(failing_marker=99)
         engine = BatchedOcr(
             detector,
@@ -146,12 +164,12 @@ class BatchedOcrTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(["first", "last"], list(result.tokens))
-        self.assertEqual(["bad"], list(result.errors))
-        self.assertGreater(result.diagnostics["text_detection"]["failure_count"], 0)
-        self.assertIn(3, detector.batch_sizes)
+        self.assertEqual([], list(result.tokens))
+        self.assertEqual(["first", "bad", "last"], list(result.errors))
+        self.assertEqual(1, result.diagnostics["text_detection"]["model_call_count"])
+        self.assertEqual([3], detector.batch_sizes)
 
-    def test_recognition_failure_does_not_corrupt_sibling_documents(self):
+    def test_recognition_batch_failure_is_not_recursively_split(self):
         recognizer = RecognitionStub(failing_marker=99)
         engine = BatchedOcr(
             DetectionStub(),
@@ -167,31 +185,88 @@ class BatchedOcrTests(unittest.TestCase):
             ]
         )
 
+        self.assertEqual([], list(result.tokens))
+        self.assertEqual(["first", "bad", "last"], list(result.errors))
+        self.assertEqual(1, result.diagnostics["text_recognition"]["model_call_count"])
+        self.assertEqual([3], recognizer.batch_sizes)
+
+    def test_ten_inputs_use_four_four_two_prediction_batches(self):
+        detector = DetectionStub()
+        recognizer = RecognitionStub()
+        result = BatchedOcr(
+            detector,
+            recognizer,
+            detection_batch_size=4,
+            recognition_batch_size=4,
+        ).run([OcrSample(str(index), image(index + 10)) for index in range(10)])
+
+        self.assertFalse(result.errors)
+        self.assertEqual([4, 4, 2], detector.batch_sizes)
+        self.assertEqual([4, 4, 2], recognizer.batch_sizes)
+        self.assertEqual([4, 4, 2], result.diagnostics["text_detection"]["tensor_batch_sizes"])
+        self.assertEqual([4, 4, 2], result.diagnostics["text_recognition"]["tensor_batch_sizes"])
+
+    def test_recognition_microbatches_use_process_worker_interface(self):
+        recognizer = ProcessRecognitionStub()
+        result = BatchedOcr(
+            DetectionStub(), recognizer, detection_batch_size=10, recognition_batch_size=4
+        ).run([OcrSample(str(index), image(index + 10)) for index in range(10)])
+
+        self.assertFalse(result.errors)
+        self.assertEqual([4, 4, 2], [len(chunk) for chunk in recognizer.chunks])
+        self.assertEqual([4, 4, 2], result.diagnostics["text_recognition"]["tensor_batch_sizes"])
+
+    def test_bad_input_is_isolated_without_reordering_successes(self):
+        result = BatchedOcr(
+            DetectionStub(), RecognitionStub(), detection_batch_size=4, recognition_batch_size=4
+        ).run(
+            [
+                OcrSample("first", image(10)),
+                OcrSample("bad", np.array([], dtype=np.uint8)),
+                OcrSample("last", image(30)),
+            ]
+        )
         self.assertEqual(["first", "last"], list(result.tokens))
         self.assertEqual(["bad"], list(result.errors))
-        self.assertGreater(result.diagnostics["text_recognition"]["failure_count"], 0)
-        self.assertIn(3, recognizer.batch_sizes)
 
 
 class ProfileBatchRunnerTests(unittest.TestCase):
+    class Localizer:
+        def __init__(self, kind):
+            self.kind = kind
+            self.batch_sizes = []
+
+        def predict_batch(self, images):
+            self.batch_sizes.append(len(images))
+            self.last_tensor_batch_size = len(images)
+            values = []
+            for value in images:
+                height, width = value.shape[:2]
+                if self.kind == "mrz":
+                    values.append({"mrz_polygon": [[0, height - 8], [width - 1, height - 8], [width - 1, height - 2], [0, height - 2]]})
+                else:
+                    values.append({"corners": full_document(value)})
+            return values
+
     def _item(self, item_id, marker):
         profile = RegionProfile(
             {"x1": 0, "y1": 0, "x2": 1, "y2": 1},
             {"field": {"x1": 0, "y1": 0, "x2": 1, "y2": 1}},
         )
         return ProfileBatchItem(
-            item_id,
-            image(marker),
-            profile,
-            full_document,
-            parse,
-            lambda _values: [],
-            WRITER,
-            60,
-            40,
+            item_id=item_id,
+            image=image(marker),
+            profile=profile,
+            localization_kind="docaligner",
+            parse_fields=parse,
+            validate_fields=lambda _values: [],
+            artifacts=WRITER,
+            canonical_width=60,
+            canonical_height=40,
         )
 
     def test_all_document_regions_share_batch_path_and_keep_order(self):
+        localizer = self.Localizer("docaligner")
         runner = ProfileBatchRunner(
             BatchedOcr(
                 DetectionStub(),
@@ -199,6 +274,8 @@ class ProfileBatchRunnerTests(unittest.TestCase):
                 detection_batch_size=8,
                 recognition_batch_size=8,
             ),
+            {"docaligner": localizer, "mrz": self.Localizer("mrz")},
+            MrzSettings("stub", 100, 1.0, 0.0),
             localization_batch_size=4,
             max_items=6,
             queue_limit=1,
@@ -221,15 +298,15 @@ class ProfileBatchRunnerTests(unittest.TestCase):
             [outcome.result[0]["field"] for outcome in outcomes],
         )
         self.assertEqual(
-            [1, 1, 1, 1],
-            diagnostics["localization"]["actual_tensor_batch_sizes"],
+            [4],
+            diagnostics["localization"]["docaligner"]["tensor_batch_sizes"],
         )
-        self.assertFalse(diagnostics["localization"]["batching_supported"])
+        self.assertEqual([4], localizer.batch_sizes)
         self.assertEqual(
-            [4], diagnostics["text_detection"]["actual_tensor_batch_sizes"]
+            [4], diagnostics["text_detection"]["tensor_batch_sizes"]
         )
         self.assertEqual(
-            [4], diagnostics["text_recognition"]["actual_tensor_batch_sizes"]
+            [4], diagnostics["text_recognition"]["tensor_batch_sizes"]
         )
 
     def test_size_and_queue_limits_are_enforced(self):
@@ -240,6 +317,8 @@ class ProfileBatchRunnerTests(unittest.TestCase):
                 detection_batch_size=1,
                 recognition_batch_size=1,
             ),
+            {"docaligner": self.Localizer("docaligner"), "mrz": self.Localizer("mrz")},
+            MrzSettings("stub", 100, 1.0, 0.0),
             localization_batch_size=1,
             max_items=1,
             queue_limit=1,
@@ -254,6 +333,24 @@ class ProfileBatchRunnerTests(unittest.TestCase):
                 gate.__enter__()
         finally:
             gate.__exit__(None, None, None)
+
+    def test_ten_localization_jobs_use_four_four_two_model_batches(self):
+        localizer = self.Localizer("docaligner")
+        runner = ProfileBatchRunner(
+            BatchedOcr(DetectionStub(), RecognitionStub(), detection_batch_size=20, recognition_batch_size=20),
+            {"docaligner": localizer, "mrz": self.Localizer("mrz")},
+            MrzSettings("stub", 100, 1.0, 0.0),
+            localization_batch_size=4,
+            max_items=10,
+            queue_limit=1,
+        )
+        outcomes, diagnostics = runner.run([self._item(str(index), index + 10) for index in range(10)])
+        self.assertTrue(all(outcome.error is None for outcome in outcomes))
+        self.assertEqual([4, 4, 2], localizer.batch_sizes)
+        self.assertEqual(
+            [4, 4, 2],
+            diagnostics["localization"]["docaligner"]["tensor_batch_sizes"],
+        )
 
 
 class ModelOwnerTests(unittest.TestCase):
@@ -284,11 +381,12 @@ class ModelOwnerTests(unittest.TestCase):
             ),
         )
         models = Models(settings)
+        models.document_localizer = lambda: ProfileBatchRunnerTests.Localizer("docaligner")
+        models.mrz_localizer = lambda: ProfileBatchRunnerTests.Localizer("mrz")
         with patch.dict("sys.modules", {"paddleocr": paddleocr}):
             runner = models.profile_batch_runner()
             self.assertIs(runner, models.profile_batch_runner())
 
-        self.assertEqual([4, 5], [item["batch_size"] for item in created])
         self.assertEqual(["cpu", "cpu"], [item["device"] for item in created])
         self.assertEqual(6, runner.max_items)
 

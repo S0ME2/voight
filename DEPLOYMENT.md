@@ -1,6 +1,6 @@
 # Docker deployment
 
-Copy `.env.example` to `.env`. Set `COMPOSE_PROFILES=cpu`, `RUNTIME_TARGET=cpu`, and `OCR_DEVICE=cpu` for local work; run `make docker-cpu-build`, `make docker-cpu-run`, or `make docker-cpu-test`.
+Copy `.env.example` to `.env`. Set `COMPOSE_PROFILES=cpu` and `RUNTIME_TARGET=cpu` for local work; run `make docker-cpu-build`, `make docker-cpu-run`, or `make docker-cpu-test`. `OCR_DEVICE` remains accepted as a deprecated fallback when `RUNTIME_TARGET` is absent; do not set both in new deployments.
 
 ## Local operations
 
@@ -13,6 +13,6 @@ container. `make docker-logs-copy` copies `/app/logs` to the ignored local
 `logs-from-container/` directory. `make docker-logs-clean` deletes every saved
 artifact inside `/app/logs`; copy any artifacts you need first.
 
-`requirements/cpu.lock` is the complete CPU install set generated from `uv.lock`; it deliberately replaces the Linux-only transitive GPU ONNX Runtime with the pinned CPU package. The Docker `cpu` and `gpu` targets populate OCR, MRZ, and driving-licence assets during the image build. Runtime images set `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True`, so startup never contacts a model source. Persisted artifact logs use the `voight-artifacts` named volume.
+`requirements/cpu.lock` is the complete CPU production install set and is installed with `--no-deps`; it deliberately replaces DocSaid/Capybara's Linux-only transitive GPU ONNX Runtime with the pinned CPU package. The ordinary project and `requirements/cpu.txt` remain CPU-safe and omit the two DocSaid wrappers because their published Linux metadata hard-depends on `onnxruntime-gpu`; the CPU Docker lock supplies those wrappers safely. The Docker `cpu` and `gpu` targets populate OCR, MRZ, and driving-licence assets during the image build. Runtime images set `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True`, so startup never contacts a model source. Persisted artifact logs use the `voight-artifacts` named volume.
 
-On the V100 server only, set all three selectors to `gpu` and run `make docker-gpu-build` followed by `make docker-gpu-test`. The GPU requirements are pinned to `paddlepaddle-gpu==3.2.2` from Paddle's CUDA 11.8 index. Compose reserves one NVIDIA GPU, starts one Uvicorn worker, and uses bounded queue and micro-batch defaults; do not run these commands on a local laptop.
+On the V100 server only, set `COMPOSE_PROFILES=gpu`, `RUNTIME_TARGET=gpu`, and `GPU_ID=0`, then run `make docker-gpu-build` followed by `make docker-gpu-test`. The test loads the deployed models and requires Paddle CUDA support plus ONNX Runtime's `CUDAExecutionProvider`. The GPU requirements pin `paddlepaddle-gpu==3.2.2` from Paddle's CUDA 11.8 index and `onnxruntime-gpu==1.22.0`. Compose reserves one NVIDIA GPU, starts one Uvicorn worker, and uses bounded queue and micro-batch defaults; do not run these commands on a local laptop.

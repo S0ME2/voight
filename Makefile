@@ -88,7 +88,7 @@ docker-cpu-test:
 	docker run --rm voight:cpu-test
 
 docker-gpu-build:
-	@echo "Server only: docker build --target gpu -t voight:gpu ."
+	docker build --target gpu -t voight:gpu .
 
 docker-gpu-test:
-	@echo "Server only: docker compose --env-file .env run --rm gpu python -c 'import paddle; paddle.utils.run_check()'"
+	docker compose --env-file .env --profile gpu run --rm gpu python -c 'from app.config import Settings; from app.models import Models; settings = Settings.from_env(); assert settings.runtime.target == "gpu"; print(Models(settings).readiness())'
