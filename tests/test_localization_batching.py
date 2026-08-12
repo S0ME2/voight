@@ -57,9 +57,9 @@ class LocalizationBatchTests(unittest.TestCase):
 
         doc = DocAlignerBatchLocalizer(aligner, preprocess=doc_preprocess, postprocess=doc_postprocess)
         images = [np.full((4, 4, 3), marker, np.uint8) for marker in (1, 2, 3)]
-        output = doc.predict_batch(images)
+        output = doc.localize_batch(images)
         self.assertEqual([(3, 3, 2, 2)], doc_engine.calls)
-        self.assertEqual([1, 2, 3], [int(item["corners"][0, 0]) for item in output])
+        self.assertEqual([1, 2, 3], [int(item.polygon[0, 0]) for item in output])
 
         mrz_engine = Engine(1)
 
@@ -74,9 +74,9 @@ class LocalizationBatchTests(unittest.TestCase):
                 return np.full((4, 2), hmap[0, 0], np.float32)
 
         mrz = MrzScannerBatchLocalizer(type("Scanner", (), {"detector": MrzInference()})())
-        output = mrz.predict_batch(images)
+        output = mrz.localize_batch(images)
         self.assertEqual([(3, 3, 2, 2)], mrz_engine.calls)
-        self.assertEqual([1, 2, 3], [int(item["mrz_polygon"][0, 0]) for item in output])
+        self.assertEqual([1, 2, 3], [int(item.polygon[0, 0]) for item in output])
 
     @unittest.skipUnless(HAS_LOCALIZERS, "CPU localization wrappers are unavailable")
     def test_real_cpu_onnx_sessions_accept_n_greater_than_one(self):
@@ -87,12 +87,11 @@ class LocalizationBatchTests(unittest.TestCase):
             self.assertEqual(["CPUExecutionProvider"], adapter.providers)
             spy = EngineSpy(adapter.engine)
             adapter.engine = spy
-            batched = adapter.predict_batch(images)
-            singles = [adapter.predict_batch([image])[0] for image in images]
+            batched = adapter.localize_batch(images)
+            singles = [adapter.localize_batch([image])[0] for image in images]
             self.assertEqual(2, spy.batch_sizes[0])
-            key = "corners" if "corners" in batched[0] else "mrz_polygon"
             for actual, expected in zip(batched, singles):
-                np.testing.assert_allclose(actual[key], expected[key], atol=1e-4)
+                np.testing.assert_allclose(actual.polygon, expected.polygon, atol=1e-4)
 
 
 if __name__ == "__main__":

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -16,7 +15,10 @@ from app.config import MrzSettings
 from app.documents.mrz import MrzProfile, crop_polygon, preprocess, reconstruct, select
 from app.documents.passport_localization import page_corners_from_mrz_width
 from app.imaging import order_corners, warp_to_size
+from app.inference.contracts import MrzRecognitionResult
+from app.inference.packing import SequentialBatchPacker
 from app.pipeline import RegionProfile, complete_profile, prepare_profile_from_detection
+from app.roi import roi_for_point
 
 Token = dict[str, Any]
 
@@ -29,34 +31,11 @@ class ResourceExhaustedError(RuntimeError):
     pass
 
 
-class InferenceGate:
-    """Bound waiting requests and serialize each complete shared-model pipeline."""
-
-    def __init__(self, queue_limit: int):
-        if queue_limit <= 0:
-            raise ValueError("queue_limit must be greater than zero")
-        self._slots = threading.BoundedSemaphore(queue_limit)
-        self._model_lock = threading.Lock()
-
-    def __enter__(self):
-        if not self._slots.acquire(blocking=False):
-            raise QueueFullError("inference queue is full")
-        try:
-            self._model_lock.acquire()
-        except BaseException:
-            self._slots.release()
-            raise
-        return self
-
-    def __exit__(self, exc_type, exc, traceback):
-        self._model_lock.release()
-        self._slots.release()
-
-
 @dataclass(frozen=True)
 class OcrSample:
     item_id: str
     image: np.ndarray
+    recognition_rois: dict[str, dict[str, float]] | None = None
 
 
 @dataclass(frozen=True)
@@ -69,13 +48,6 @@ class OcrBatchResult:
 def _chunks(values: Sequence[Any], size: int):
     for start in range(0, len(values), size):
         yield values[start : start + size]
-
-
-def _result_value(result: Any, key: str, default: Any = None) -> Any:
-    try:
-        return result[key]
-    except (KeyError, TypeError):
-        return getattr(result, key, default)
 
 
 def _line_crop(image: np.ndarray, polygon: Any) -> tuple[np.ndarray, np.ndarray]:
@@ -122,12 +94,33 @@ def _is_resource_error(error: BaseException) -> bool:
     )
 
 
+def _shape_stats(images: Sequence[np.ndarray]) -> dict[str, float]:
+    ratios = [image.shape[1] / max(1, image.shape[0]) for image in images]
+    padded = max(ratios) * len(ratios)
+    return {
+        "min_aspect_ratio": min(ratios),
+        "max_aspect_ratio": max(ratios),
+        "mean_aspect_ratio": sum(ratios) / len(ratios),
+        "padded_width_estimate": padded,
+        "unpadded_width_estimate": sum(ratios),
+        "padding_efficiency_estimate": sum(ratios) / padded if padded else 1.0,
+    }
+
+
 def _finish_stage(stage: dict[str, Any]) -> None:
     calls = stage["calls"]
-    stage["model_call_count"] = len(calls)
+    stage["model_call_count"] = sum(len(call.get("tensor_batch_sizes", (call.get("tensor_batch_size"),))) for call in calls)
     stage["submitted_batch_sizes"] = [call["submitted_batch_size"] for call in calls]
-    stage["tensor_batch_sizes"] = [call["tensor_batch_size"] for call in calls if "tensor_batch_size" in call]
-    stage["failure_count"] = sum(call["failure_count"] for call in calls)
+    stage["tensor_batch_sizes"] = [
+        size
+        for call in calls
+        for size in call.get("tensor_batch_sizes", (call.get("tensor_batch_size"),))
+        if size is not None
+    ]
+    stage["attempt_failure_count"] = sum(call["failure_count"] for call in calls)
+    stage.setdefault("failure_count", stage["attempt_failure_count"])
+    stage.setdefault("retry_split_count", 0)
+    stage.setdefault("isolated_failure_count", 0)
     stage["model_seconds"] = sum(call["model_seconds"] for call in calls)
     stage["wall_seconds"] = stage.get(
         "elapsed_wall_seconds",
@@ -145,6 +138,7 @@ class BatchedOcr:
         *,
         detection_batch_size: int,
         recognition_batch_size: int,
+        recognition_packer: Any | None = None,
     ):
         if detection_batch_size <= 0 or recognition_batch_size <= 0:
             raise ValueError("OCR batch sizes must be greater than zero")
@@ -152,11 +146,7 @@ class BatchedOcr:
         self.recognizer = recognizer
         self.detection_batch_size = detection_batch_size
         self.recognition_batch_size = recognition_batch_size
-
-    @staticmethod
-    def _predict(model: Any, images: list[np.ndarray]) -> list[Any]:
-        predict = getattr(model, "predict", model)
-        return list(predict(input=images, batch_size=len(images)))
+        self.recognition_packer = recognition_packer or SequentialBatchPacker()
 
     def _predict_chunk(
         self,
@@ -164,11 +154,17 @@ class BatchedOcr:
         model: Any,
         indexed_images: list[tuple[int, np.ndarray]],
         calls: list[dict[str, Any]],
+        stats: dict[str, int],
     ) -> tuple[dict[int, Any], dict[int, Exception]]:
         started = time.perf_counter()
         size = len(indexed_images)
         try:
-            values = self._predict(model, [image for _, image in indexed_images])
+            images = [image for _, image in indexed_images]
+            values = list(
+                model.detect_batch(images)
+                if stage_name == "text detection"
+                else model.recognize_batch(images)
+            )
             if len(values) != size:
                 raise ValueError(f"{stage_name} returned {len(values)} results for {size} inputs")
         except Exception as error:
@@ -182,17 +178,31 @@ class BatchedOcr:
                     "model_seconds": time.perf_counter() - started,
                     "wall_seconds": time.perf_counter() - started,
                     "error_type": type(error).__name__,
+                    **(_shape_stats([image for _, image in indexed_images]) if stage_name == "text recognition" else {}),
                 }
             )
-            return {}, {index: error for index, _ in indexed_images}
+            if size == 1:
+                stats["isolated_failure_count"] += 1
+                return {}, {indexed_images[0][0]: error}
+            stats["retry_split_count"] += 1
+            midpoint = size // 2
+            left_results, left_failures = self._predict_chunk(
+                stage_name, model, indexed_images[:midpoint], calls, stats
+            )
+            right_results, right_failures = self._predict_chunk(
+                stage_name, model, indexed_images[midpoint:], calls, stats
+            )
+            return left_results | right_results, left_failures | right_failures
         elapsed = time.perf_counter() - started
+        model_seconds = getattr(model, "last_model_seconds", None) or elapsed
         calls.append(
             {
                 "submitted_batch_size": size,
                 "tensor_batch_size": size,
                 "failure_count": 0,
-                "model_seconds": elapsed,
+                "model_seconds": model_seconds,
                 "wall_seconds": elapsed,
+                **(_shape_stats([image for _, image in indexed_images]) if stage_name == "text recognition" else {}),
             }
         )
         return {index: value for (index, _), value in zip(indexed_images, values)}, {}
@@ -210,10 +220,24 @@ class BatchedOcr:
         }
         valid = [(index, sample.image) for index, sample in enumerate(samples) if index not in invalid]
         diagnostics = {
-            "text_detection": {"configured_batch_size": self.detection_batch_size, "calls": []},
+            "text_detection": {
+                "configured_batch_size": self.detection_batch_size,
+                "calls": [],
+                "retry_split_count": 0,
+                "isolated_failure_count": 0,
+            },
             "text_recognition": {
                 "configured_batch_size": self.recognition_batch_size,
+                "packing_strategy": self.recognition_packer.name,
                 "calls": [],
+                "retry_split_count": 0,
+                "isolated_failure_count": 0,
+            },
+            "line_filter": {
+                "detected_line_count": 0,
+                "recognition_candidate_count": 0,
+                "filtered_before_recognition_count": 0,
+                "samples": {},
             },
             "line_crop_seconds": 0.0,
             "result_unpack_seconds": 0.0,
@@ -227,6 +251,7 @@ class BatchedOcr:
                 self.detector,
                 _pad_detection_batch(chunk),
                 diagnostics["text_detection"]["calls"],
+                diagnostics["text_detection"],
             )
             detection_results.update(results)
             errors.update(failures)
@@ -234,81 +259,65 @@ class BatchedOcr:
         line_crop_started = time.perf_counter()
         lines: list[tuple[int, np.ndarray, np.ndarray]] = []
         for sample_index, result in detection_results.items():
-            if error := _result_value(result, "error"):
-                errors[sample_index] = ValueError(str(error))
+            if result.error:
+                errors[sample_index] = ValueError(result.error)
                 continue
-            polygon_value = _result_value(result, "dt_polys", [])
-            polygons = [] if polygon_value is None else list(polygon_value)
+            polygons = [region.polygon for region in result.regions]
             polygons.sort(key=lambda polygon: (float(np.asarray(polygon)[:, 1].mean()), float(np.asarray(polygon)[:, 0].min())))
+            sample = samples[sample_index]
+            counts = {"detected_line_count": len(polygons), "recognition_candidate_count": 0, "filtered_before_recognition_count": 0}
+            diagnostics["line_filter"]["samples"][sample.item_id] = counts
+            diagnostics["line_filter"]["detected_line_count"] += len(polygons)
             for polygon in polygons:
                 try:
                     polygon = np.asarray(polygon, dtype=np.float32)
-                    height, width = samples[sample_index].image.shape[:2]
+                    height, width = sample.image.shape[:2]
                     polygon[:, 0] = np.clip(polygon[:, 0], 0, width - 1)
                     polygon[:, 1] = np.clip(polygon[:, 1], 0, height - 1)
-                    crop, ordered = _line_crop(samples[sample_index].image, polygon)
+                    center_x, center_y = (polygon.min(axis=0) + polygon.max(axis=0)) / 2
+                    if sample.recognition_rois is not None and roi_for_point(
+                        sample.recognition_rois, width, height, float(center_x), float(center_y)
+                    ) is None:
+                        counts["filtered_before_recognition_count"] += 1
+                        diagnostics["line_filter"]["filtered_before_recognition_count"] += 1
+                        continue
+                    crop, ordered = _line_crop(sample.image, polygon)
                 except (cv2.error, TypeError, ValueError) as error:
                     errors[sample_index] = error
                     lines = [line for line in lines if line[0] != sample_index]
+                    diagnostics["line_filter"]["recognition_candidate_count"] -= counts["recognition_candidate_count"]
+                    counts["recognition_candidate_count"] = 0
+                    dropped = len(polygons) - counts["filtered_before_recognition_count"]
+                    counts["filtered_before_recognition_count"] += dropped
+                    diagnostics["line_filter"]["filtered_before_recognition_count"] += dropped
                     break
                 lines.append((sample_index, crop, ordered))
+                counts["recognition_candidate_count"] += 1
+                diagnostics["line_filter"]["recognition_candidate_count"] += 1
         diagnostics["line_crop_seconds"] = time.perf_counter() - line_crop_started
 
         recognition_results: dict[int, Any] = {}
         recognition_errors: dict[int, Exception] = {}
-        recognition_chunks = [
-            list(chunk)
-            for chunk in _chunks(
-                [(index, line[1]) for index, line in enumerate(lines)],
-                self.recognition_batch_size,
+        recognition_chunks = self.recognition_packer.pack(
+            [(index, line[1]) for index, line in enumerate(lines)],
+            self.recognition_batch_size,
+        )
+        recognition_started = time.perf_counter()
+        for chunk in recognition_chunks:
+            results, failures = self._predict_chunk(
+                "text recognition", self.recognizer, chunk,
+                diagnostics["text_recognition"]["calls"], diagnostics["text_recognition"]
             )
-        ]
-        if hasattr(self.recognizer, "predict_chunks") and recognition_chunks:
-            recognition_started = time.perf_counter()
-            try:
-                predictions = self.recognizer.predict_chunks(
-                    [[image for _, image in chunk] for chunk in recognition_chunks]
-                )
-                if len(predictions) != len(recognition_chunks):
-                    raise ValueError("text recognition returned an unexpected number of batches")
-                for chunk, (values, model_seconds) in zip(recognition_chunks, predictions):
-                    if len(values) != len(chunk):
-                        raise ValueError(f"text recognition returned {len(values)} results for {len(chunk)} inputs")
-                    diagnostics["text_recognition"]["calls"].append(
-                        {
-                            "submitted_batch_size": len(chunk),
-                            "tensor_batch_size": len(chunk),
-                            "failure_count": 0,
-                            "model_seconds": model_seconds,
-                            "wall_seconds": model_seconds,
-                        }
-                    )
-                    recognition_results.update(
-                        {index: value for (index, _), value in zip(chunk, values)}
-                    )
-            except Exception as error:
-                if _is_resource_error(error):
-                    raise ResourceExhaustedError("text recognition resource failure") from error
-                for chunk in recognition_chunks:
-                    diagnostics["text_recognition"]["calls"].append(
-                        {
-                            "submitted_batch_size": len(chunk),
-                            "tensor_batch_size": len(chunk),
-                            "failure_count": len(chunk),
-                            "model_seconds": 0.0,
-                            "wall_seconds": 0.0,
-                            "error_type": type(error).__name__,
-                        }
-                    )
-                    recognition_errors.update({index: error for index, _ in chunk})
-            diagnostics["text_recognition"]["elapsed_wall_seconds"] = time.perf_counter() - recognition_started
-        else:
-            for chunk in recognition_chunks:
-                results, failures = self._predict_chunk(
-                    "text recognition", self.recognizer, chunk, diagnostics["text_recognition"]["calls"]
-                )
-                recognition_results.update(results)
-                recognition_errors.update(failures)
+            recognition_results.update(results)
+            recognition_errors.update(failures)
+        diagnostics["text_recognition"]["elapsed_wall_seconds"] = time.perf_counter() - recognition_started
+        diagnostics["text_detection"]["failure_count"] = len(
+            set(errors) & set(sample_index for sample_index, _ in valid)
+        )
+        diagnostics["text_recognition"]["failure_count"] = len(recognition_errors)
+        diagnostics["text_recognition"]["original_index_restoration_success"] = (
+            set(recognition_results) | set(recognition_errors) == set(range(len(lines)))
+        )
 
         result_unpack_started = time.perf_counter()
         tokens_by_index: dict[int, list[Token]] = {
@@ -322,10 +331,8 @@ class BatchedOcr:
             if sample_index in errors:
                 continue
             result = recognition_results[line_index]
-            text = _result_value(result, "rec_text", "")
-            if isinstance(text, (list, tuple)):
-                text = text[0] if text else ""
-            score = float(_result_value(result, "rec_score", 0.0))
+            text = result.text
+            score = float(result.score or 0.0)
             x1, y1 = polygon.min(axis=0)
             x2, y2 = polygon.max(axis=0)
             item_tokens = tokens_by_index[sample_index]
@@ -370,6 +377,7 @@ class ProfileBatchItem:
     passport_page_corners: Any | None = None
     mrz_profile: MrzProfile | None = None
     probe_mrz: bool = False
+    mrz_fallback_for: str | None = None
 
 
 @dataclass(frozen=True)
@@ -392,16 +400,58 @@ class ProfileBatchRunner:
         *,
         localization_batch_size: int,
         max_items: int,
-        queue_limit: int,
+        mrz_recognizer: Any | None = None,
+        mrz_recognition_batch_size: int | None = None,
     ):
-        if localization_batch_size <= 0 or max_items <= 0:
+        if localization_batch_size <= 0 or max_items <= 0 or (
+            mrz_recognition_batch_size is not None and mrz_recognition_batch_size <= 0
+        ):
             raise ValueError("batch limits must be greater than zero")
         self.ocr = ocr
         self.localizers = localizers
         self.mrz_settings = mrz_settings
         self.localization_batch_size = localization_batch_size
+        self.mrz_recognizer = mrz_recognizer
+        self.mrz_recognition_batch_size = mrz_recognition_batch_size or ocr.recognition_batch_size
         self.max_items = max_items
-        self.gate = InferenceGate(queue_limit)
+
+    def _recognize_mrz_chunk(
+        self,
+        indexed_images: list[tuple[str, np.ndarray]],
+        calls: list[dict[str, Any]],
+        stats: dict[str, int],
+    ) -> tuple[dict[str, MrzRecognitionResult], dict[str, Exception]]:
+        started = time.perf_counter()
+        size = len(indexed_images)
+        try:
+            values = list(self.mrz_recognizer.recognize_batch([image for _, image in indexed_images]))
+            if len(values) != size:
+                raise ValueError(f"MRZ recognition returned {len(values)} results for {size} inputs")
+        except Exception as error:
+            if _is_resource_error(error):
+                raise ResourceExhaustedError("MRZ recognition resource failure") from error
+            elapsed = time.perf_counter() - started
+            calls.append({"submitted_batch_size": size, "tensor_batch_size": size, "failure_count": size, "model_seconds": elapsed, "wall_seconds": elapsed, "error_type": type(error).__name__})
+            if size == 1:
+                stats["isolated_failure_count"] += 1
+                return {}, {indexed_images[0][0]: error}
+            stats["retry_split_count"] += 1
+            midpoint = size // 2
+            left, left_errors = self._recognize_mrz_chunk(indexed_images[:midpoint], calls, stats)
+            right, right_errors = self._recognize_mrz_chunk(indexed_images[midpoint:], calls, stats)
+            return left | right, left_errors | right_errors
+        elapsed = time.perf_counter() - started
+        call = {
+            "submitted_batch_size": size,
+            "tensor_batch_size": getattr(self.mrz_recognizer, "last_tensor_batch_size", size),
+            "failure_count": 0,
+            "model_seconds": getattr(self.mrz_recognizer, "last_model_seconds", elapsed),
+            "wall_seconds": elapsed,
+        }
+        if sizes := getattr(self.mrz_recognizer, "last_tensor_batch_sizes", None):
+            call["tensor_batch_sizes"] = list(sizes)
+        calls.append(call)
+        return {item_id: value for (item_id, _), value in zip(indexed_images, values)}, {}
 
     def _localize(
         self,
@@ -417,7 +467,7 @@ class ProfileBatchRunner:
                 started = time.perf_counter()
                 size = len(chunk)
                 try:
-                    values = list(localizer.predict_batch([image for _, image in chunk]))
+                    values = list(localizer.localize_batch([image for _, image in chunk]))
                     if len(values) != size:
                         raise ValueError(f"{kind} localization returned {len(values)} results for {size} inputs")
                     if getattr(localizer, "last_tensor_batch_size", None) != size:
@@ -448,6 +498,20 @@ class ProfileBatchRunner:
             stages[kind] = stage
         return results, errors, stages
 
+    @staticmethod
+    def _merge_localization_diagnostics(*groups: dict[str, Any]) -> dict[str, Any]:
+        merged: dict[str, Any] = {}
+        for group in groups:
+            for kind, stage in group.items():
+                target = merged.setdefault(kind, {
+                    "configured_batch_size": stage["configured_batch_size"],
+                    "calls": [],
+                })
+                target["calls"].extend(stage["calls"])
+        for stage in merged.values():
+            _finish_stage(stage)
+        return merged
+
     def run(self, items: Sequence[ProfileBatchItem]) -> tuple[list[ProfileBatchOutcome], dict[str, Any]]:
         if len(items) > self.max_items:
             raise ValueError(f"batch contains {len(items)} items; maximum is {self.max_items}")
@@ -456,133 +520,206 @@ class ProfileBatchRunner:
             raise ValueError("profile batch item IDs must be unique")
         started_total = time.perf_counter()
 
-        with self.gate:
-            groups: dict[str, list[tuple[str, np.ndarray]]] = {}
-            padded_images: dict[str, np.ndarray] = {}
-            for item in items:
-                if item.localization_kind not in self.localizers:
-                    raise ValueError(f"unknown localization kind: {item.localization_kind}")
-                if item.localization_kind == "docaligner":
-                    padded = cv2.copyMakeBorder(
-                        item.image,
-                        item.padding,
-                        item.padding,
-                        item.padding,
-                        item.padding,
-                        cv2.BORDER_CONSTANT,
-                        value=(0, 0, 0),
-                    )
-                    padded_images[item.item_id] = padded
-                    groups.setdefault("docaligner", []).append((item.item_id, padded))
+        groups: dict[str, list[tuple[str, np.ndarray]]] = {}
+        padded_images: dict[str, np.ndarray] = {}
+        for item in items:
+            if item.localization_kind not in self.localizers:
+                raise ValueError(f"unknown localization kind: {item.localization_kind}")
+            if item.localization_kind == "docaligner":
+                padded = cv2.copyMakeBorder(
+                    item.image,
+                    item.padding,
+                    item.padding,
+                    item.padding,
+                    item.padding,
+                    cv2.BORDER_CONSTANT,
+                    value=(0, 0, 0),
+                )
+                padded_images[item.item_id] = padded
+                groups.setdefault("docaligner", []).append((item.item_id, padded))
+            else:
+                groups.setdefault(item.localization_kind, []).append((item.item_id, item.image))
+        localization, errors, localization_diagnostics = self._localize(groups)
+        primary_jobs = [
+            (item.item_id, item.image)
+            for item in items
+            if item.probe_mrz and item.localization_kind != "mrz"
+        ]
+        primary, _primary_errors, primary_diagnostics = self._localize(
+            {"mrz": primary_jobs} if primary_jobs else {}
+        )
+        localization.update(primary)
+
+        def has_mrz(item_id: str) -> bool:
+            result = localization.get((item_id, "mrz"))
+            return result is not None and result.polygon.size == 8
+
+        fallback_items = [
+            item for item in items
+            if item.mrz_fallback_for and not has_mrz(item.mrz_fallback_for)
+        ]
+        fallback, _fallback_errors, fallback_diagnostics = self._localize(
+            {"mrz": [(item.item_id, item.image) for item in fallback_items]}
+            if fallback_items else {}
+        )
+        localization.update(fallback)
+        localization_diagnostics = self._merge_localization_diagnostics(
+            localization_diagnostics, primary_diagnostics, fallback_diagnostics
+        )
+        fallback_by_primary = {item.mrz_fallback_for: item for item in fallback_items}
+        probe_samples = {}
+        for primary_id, _ in primary_jobs:
+            fallback_item = fallback_by_primary.get(primary_id)
+            probe_samples[primary_id] = {
+                "back_scanned": True,
+                "front_fallback_scanned": fallback_item is not None,
+                "side_selected": "back" if has_mrz(primary_id) else "front" if fallback_item and has_mrz(fallback_item.item_id) else None,
+            }
+        mrz_probe_diagnostics = {
+            "back_scanned": len(primary_jobs),
+            "front_fallback_scanned": len(fallback_items),
+            "samples": probe_samples,
+        }
+        prepared: dict[str, Any] = {}
+        mrz_polygons: dict[str, np.ndarray] = {}
+        preparation_started = time.perf_counter()
+        for item in items:
+            if item.item_id in errors:
+                continue
+            try:
+                if item.localization_kind == "mrz":
+                    mrz = localization[(item.item_id, "mrz")].polygon.reshape(4, 2)
+                    if item.passport_page_corners is None:
+                        raise ValueError("MRZ localization requires passport page geometry")
+                    corners = page_corners_from_mrz_width(mrz, item.passport_page_corners)
+                    mrz_polygons[item.item_id] = mrz
                 else:
-                    groups.setdefault(item.localization_kind, []).append((item.item_id, item.image))
-                if item.probe_mrz and item.localization_kind != "mrz":
-                    groups.setdefault("mrz", []).append((item.item_id, item.image))
+                    padded_corners = localization[(item.item_id, "docaligner")].polygon.reshape(4, 2)
+                    corners = padded_corners - item.padding
+                    if item.probe_mrz or item.mrz_fallback_for:
+                        probe = localization.get((item.item_id, "mrz"))
+                        if probe is not None and probe.polygon.size == 8:
+                            polygon = probe.polygon
+                            mrz_polygons[item.item_id] = polygon.reshape(4, 2)
+                prepared[item.item_id] = prepare_profile_from_detection(
+                    item.image,
+                    item.profile,
+                    corners,
+                    item.artifacts,
+                    canonical_width=item.canonical_width,
+                    canonical_height=item.canonical_height,
+                    padding=item.padding,
+                    padded=padded_images.get(item.item_id),
+                    padded_corners=(corners + item.padding),
+                    started_total=started_total,
+                )
+            except (cv2.error, IndexError, KeyError, TypeError, ValueError) as error:
+                errors[item.item_id] = error
+        preparation_seconds = time.perf_counter() - preparation_started
 
-            localization, errors, localization_diagnostics = self._localize(groups)
-            prepared: dict[str, Any] = {}
-            mrz_polygons: dict[str, np.ndarray] = {}
-            preparation_started = time.perf_counter()
-            for item in items:
-                if item.item_id in errors:
-                    continue
-                try:
-                    if item.localization_kind == "mrz":
-                        mrz = np.asarray(localization[(item.item_id, "mrz")]["mrz_polygon"], dtype=np.float32).reshape(4, 2)
-                        if item.passport_page_corners is None:
-                            raise ValueError("MRZ localization requires passport page geometry")
-                        corners = page_corners_from_mrz_width(mrz, item.passport_page_corners)
-                        mrz_polygons[item.item_id] = mrz
-                    else:
-                        padded_corners = np.asarray(
-                            localization[(item.item_id, "docaligner")]["corners"], dtype=np.float32
-                        ).reshape(4, 2)
-                        corners = padded_corners - item.padding
-                        if item.probe_mrz:
-                            polygon = np.asarray(localization[(item.item_id, "mrz")]["mrz_polygon"], dtype=np.float32)
-                            if polygon.size == 8:
-                                mrz_polygons[item.item_id] = polygon.reshape(4, 2)
-                    prepared[item.item_id] = prepare_profile_from_detection(
-                        item.image,
-                        item.profile,
-                        corners,
-                        item.artifacts,
-                        canonical_width=item.canonical_width,
-                        canonical_height=item.canonical_height,
-                        padding=item.padding,
-                        padded=padded_images.get(item.item_id),
-                        padded_corners=(corners + item.padding),
-                        started_total=started_total,
-                    )
-                except (cv2.error, IndexError, KeyError, TypeError, ValueError) as error:
-                    errors[item.item_id] = error
-            preparation_seconds = time.perf_counter() - preparation_started
+        ocr_samples = [
+            OcrSample(
+                f"visible:{item.item_id}",
+                prepared[item.item_id].data_crop,
+                prepared[item.item_id].profile.field_rois,
+            )
+            for item in items
+            if item.item_id in prepared
+        ]
+        mrz_crops: list[tuple[str, np.ndarray]] = []
+        mrz_crop_started = time.perf_counter()
+        for item in items:
+            if item.mrz_profile is None or item.item_id not in mrz_polygons or item.item_id in errors:
+                continue
+            try:
+                crop, expanded = crop_polygon(
+                    item.image, mrz_polygons[item.item_id], self.mrz_settings.polygon_padding_ratio
+                )
+                processed = preprocess(crop, self.mrz_settings.max_side, self.mrz_settings.contrast)
+                item.artifacts.save_json(
+                    "mrz_polygons.json",
+                    {"detected_polygon": mrz_polygons[item.item_id], "expanded_polygon": expanded},
+                )
+                item.artifacts.save_image("mrz_crop.jpg", crop)
+                item.artifacts.save_image("mrz_preprocessed.png", processed)
+                if self.mrz_recognizer is None:
+                    ocr_samples.append(OcrSample(f"mrz:{item.item_id}", processed))
+                else:
+                    mrz_crops.append((item.item_id, crop))
+            except (cv2.error, TypeError, ValueError) as error:
+                errors[item.item_id] = error
+        mrz_crop_seconds = time.perf_counter() - mrz_crop_started
 
-            ocr_samples = [
-                OcrSample(f"visible:{item.item_id}", prepared[item.item_id].data_crop)
-                for item in items
-                if item.item_id in prepared
-            ]
-            mrz_crop_started = time.perf_counter()
-            for item in items:
-                if item.mrz_profile is None or item.item_id not in mrz_polygons or item.item_id in errors:
-                    continue
-                try:
-                    crop, expanded = crop_polygon(
-                        item.image, mrz_polygons[item.item_id], self.mrz_settings.polygon_padding_ratio
-                    )
-                    processed = preprocess(crop, self.mrz_settings.max_side, self.mrz_settings.contrast)
-                    item.artifacts.save_json(
-                        "mrz_polygons.json",
-                        {"detected_polygon": mrz_polygons[item.item_id], "expanded_polygon": expanded},
-                    )
-                    item.artifacts.save_image("mrz_crop.jpg", crop)
-                    item.artifacts.save_image("mrz_preprocessed.png", processed)
-                    sample_id = f"mrz:{item.item_id}"
-                    ocr_samples.append(OcrSample(sample_id, processed))
-                except (cv2.error, TypeError, ValueError) as error:
-                    errors[item.item_id] = error
-            mrz_crop_seconds = time.perf_counter() - mrz_crop_started
-
-            ocr_result = self.ocr.run(ocr_samples)
-            outcomes_by_id: dict[str, ProfileBatchOutcome] = {}
-            for sample_id, error in ocr_result.errors.items():
-                errors[sample_id.split(":", 1)[1]] = error
-            result_assembly_started = time.perf_counter()
-            for item in items:
-                if item.item_id in errors:
-                    outcomes_by_id[item.item_id] = ProfileBatchOutcome(item.item_id, error=errors[item.item_id])
-                    continue
-                try:
-                    result = complete_profile(
-                        prepared[item.item_id],
-                        ocr_result.tokens[f"visible:{item.item_id}"],
-                        item.parse_fields,
-                        item.validate_fields,
-                        min_overlap=item.min_overlap,
-                        ocr_seconds=None,
-                    )
-                    mrz_text = None
-                    sample_id = f"mrz:{item.item_id}"
-                    if item.mrz_profile is not None:
+        ocr_result = self.ocr.run(ocr_samples)
+        mrz_diagnostics = {
+            "backend": "generic-paddle" if self.mrz_recognizer is None else "mrzscanner",
+            "configured_batch_size": self.mrz_recognition_batch_size,
+            "calls": [],
+            "retry_split_count": 0,
+            "isolated_failure_count": 0,
+        }
+        mrz_results: dict[str, MrzRecognitionResult] = {}
+        mrz_errors: dict[str, Exception] = {}
+        mrz_started = time.perf_counter()
+        if self.mrz_recognizer is not None:
+            for chunk in _chunks(mrz_crops, self.mrz_recognition_batch_size):
+                results, failures = self._recognize_mrz_chunk(
+                    list(chunk), mrz_diagnostics["calls"], mrz_diagnostics
+                )
+                mrz_results.update(results)
+                mrz_errors.update(failures)
+        mrz_diagnostics["elapsed_wall_seconds"] = time.perf_counter() - mrz_started
+        mrz_diagnostics["failure_count"] = len(mrz_errors)
+        _finish_stage(mrz_diagnostics)
+        errors.update(mrz_errors)
+        outcomes_by_id: dict[str, ProfileBatchOutcome] = {}
+        for sample_id, error in ocr_result.errors.items():
+            errors[sample_id.split(":", 1)[1]] = error
+        result_assembly_started = time.perf_counter()
+        for item in items:
+            if item.item_id in errors:
+                outcomes_by_id[item.item_id] = ProfileBatchOutcome(item.item_id, error=errors[item.item_id])
+                continue
+            try:
+                result = complete_profile(
+                    prepared[item.item_id],
+                    ocr_result.tokens[f"visible:{item.item_id}"],
+                    item.parse_fields,
+                    item.validate_fields,
+                    min_overlap=item.min_overlap,
+                    ocr_seconds=None,
+                )
+                mrz_text = None
+                sample_id = f"mrz:{item.item_id}"
+                if item.mrz_profile is not None:
+                    if self.mrz_recognizer is None:
                         tokens = ocr_result.tokens.get(sample_id, [])
                         selected = select(reconstruct(tokens), item.mrz_profile.line_counts)
                         mrz_text = "\n".join(line.text for line in selected)
-                    result[1]["timings"]["total_seconds"] = time.perf_counter() - started_total
-                except (cv2.error, IndexError, KeyError, TypeError, ValueError) as error:
-                    outcomes_by_id[item.item_id] = ProfileBatchOutcome(item.item_id, error=error)
-                else:
-                    outcomes_by_id[item.item_id] = ProfileBatchOutcome(
-                        item.item_id,
-                        result=result,
-                        mrz_text=mrz_text,
-                        mrz_detected=item.item_id in mrz_polygons,
-                    )
-            result_assembly_seconds = time.perf_counter() - result_assembly_started
+                    else:
+                        recognized = mrz_results.get(item.item_id)
+                        mrz_text = "\n".join(recognized.lines) if recognized else ""
+                        item.artifacts.save_json("mrz_recognition.json", {
+                            "status": recognized.status if recognized else "not_found",
+                            "raw_lines": list(recognized.lines) if recognized else [],
+                            "score": recognized.score if recognized else None,
+                        })
+                result[1]["timings"]["total_seconds"] = time.perf_counter() - started_total
+            except (cv2.error, IndexError, KeyError, TypeError, ValueError) as error:
+                outcomes_by_id[item.item_id] = ProfileBatchOutcome(item.item_id, error=error)
+            else:
+                outcomes_by_id[item.item_id] = ProfileBatchOutcome(
+                    item.item_id,
+                    result=result,
+                    mrz_text=mrz_text,
+                    mrz_detected=item.item_id in mrz_polygons,
+                )
+        result_assembly_seconds = time.perf_counter() - result_assembly_started
 
         diagnostics = {
             "total_wall_seconds": time.perf_counter() - started_total,
             "localization": localization_diagnostics,
+            "id_card_mrz_probe": mrz_probe_diagnostics,
             "pipeline": {
                 "document_preparation_seconds": preparation_seconds,
                 "canonicalization_seconds": sum(value.timings.get("canonicalization_seconds", 0.0) for value in prepared.values()),
@@ -591,5 +728,6 @@ class ProfileBatchRunner:
                 "result_assembly_seconds": result_assembly_seconds,
             },
             **ocr_result.diagnostics,
+            "mrz_recognition": mrz_diagnostics,
         }
         return [outcomes_by_id[item.item_id] for item in items], diagnostics

@@ -1,3 +1,5 @@
+import asyncio
+import threading
 from dataclasses import replace
 from io import BytesIO
 import os
@@ -6,11 +8,12 @@ import zipfile
 from unittest.mock import patch
 
 import cv2
+import httpx
 import numpy as np
 from fastapi.testclient import TestClient
 from fastapi import HTTPException
 
-from app.api.v1 import _driving_field_results, _id_archive, _image_inputs, _run_batch, _safe_entries
+from app.api.v1 import AsyncInferenceGate, _driving_field_results, _id_archive, _image_inputs, _run_batch, _safe_entries
 from app.artifacts import ArtifactSettings
 from app.config import Settings
 from app.contracts import DocumentType, ErrorCode
@@ -218,6 +221,85 @@ class V1TransportTests(unittest.TestCase):
         self.assertEqual(6, models.runner.calls)
         self.assertEqual([1, 2, 2, 4, 1, 2], models.runner.job_counts)
         self.assertEqual(1, responses[1].json()["diagnostics"]["text_detection"]["model_call_count"])
+
+
+class AsyncInferenceGateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_live_health_returns_while_active_inference_runs_off_loop(self):
+        class SlowRunner(Runner):
+            def __init__(self):
+                super().__init__()
+                self.started = threading.Event()
+                self.release = threading.Event()
+
+            def run(self, jobs):
+                self.started.set()
+                self.release.wait(2)
+                return super().run(jobs)
+
+        base = Settings.from_env()
+        settings = replace(base, artifacts=ArtifactSettings(False, base.artifacts.directory))
+        models = Models()
+        models.runner = SlowRunner()
+        with patch("app.main.Models", return_value=models):
+            application = create_app(settings)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=application), base_url="http://test") as client:
+            request = asyncio.create_task(
+                client.post("/v1/ocr/passport", files={"image": ("p.jpg", image_bytes(), "image/jpeg")})
+            )
+            self.assertTrue(await asyncio.to_thread(models.runner.started.wait, 2))
+            health = await client.get("/v1/health/live")
+            self.assertEqual(200, health.status_code)
+            self.assertFalse(request.done())
+            models.runner.release.set()
+            self.assertEqual(200, (await request).status_code)
+
+    async def test_admission_serializes_orders_and_releases_after_errors(self):
+        gate = AsyncInferenceGate(3)
+        started = threading.Event()
+        release = threading.Event()
+        order = []
+
+        def first():
+            order.append("first")
+            started.set()
+            release.wait(2)
+
+        first_task = asyncio.create_task(gate.run(first))
+        self.assertTrue(await asyncio.to_thread(started.wait, 2))
+        second = asyncio.create_task(gate.run(lambda: order.append("second")))
+        third = asyncio.create_task(gate.run(lambda: order.append("third")))
+        await asyncio.sleep(0)
+        self.assertEqual(["first"], order)
+        release.set()
+        await asyncio.gather(first_task, second, third)
+        self.assertEqual(["first", "second", "third"], order)
+
+        with self.assertRaisesRegex(ValueError, "boom"):
+            await gate.run(lambda: (_ for _ in ()).throw(ValueError("boom")))
+        self.assertEqual("reused", await gate.run(lambda: "reused"))
+
+    async def test_queue_overflow_and_cancelled_waiter_release_their_slots(self):
+        gate = AsyncInferenceGate(2)
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow():
+            started.set()
+            release.wait(2)
+
+        first = asyncio.create_task(gate.run(slow))
+        self.assertTrue(await asyncio.to_thread(started.wait, 2))
+        waiting = asyncio.create_task(gate.run(lambda: None))
+        await asyncio.sleep(0)
+        with self.assertRaisesRegex(Exception, "queue is full"):
+            await gate.run(lambda: None)
+        waiting.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await waiting
+        third = asyncio.create_task(gate.run(lambda: "after-cancel"))
+        release.set()
+        await first
+        self.assertEqual("after-cancel", await third)
 
 
 if __name__ == "__main__":

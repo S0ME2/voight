@@ -11,6 +11,12 @@ flattens detected lines into recognition batches, and restores tokens by stable
 item ID. Single routes call the same coordinator with one logical document.
 The unversioned migration routes retain their old sequential workflows.
 
+V1 model calls are behind project-owned contracts in
+`inference/contracts.py`. `Models` is the composition root for Paddle,
+DocAligner, and MRZScanner adapters. Document pipeline specifications own
+regions, MRZ ownership, and visible/MRZ reconciliation; crop packing owns only
+recognition execution order and restores the original order afterward.
+
 `imaging.py`, `ocr.py`, and `roi.py` contain generic mechanics shared by pipelines. `documents/mrz.py` is the common MRZ localization and reconstruction implementation, configured by an ID-card or passport profile. `documents/driving_license.py` contains the alignment and ROI pipeline; `driving_license_fields.py` preserves recognized driving-licence text for downstream parsing.
 
 The Uzbekistan passport profile derives its page quadrilateral from the detected

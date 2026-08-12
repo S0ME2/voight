@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -22,11 +23,60 @@ from app.contracts import (
     ValidationResult,
     ValidationStatus,
 )
-from app.documents.mrz import parse as parse_mrz
+from app.documents.mrz import ID_CARD, PASSPORT, MrzProfile, parse as parse_mrz
 from app.documents.profiles import load_document_profile
 from app.pipeline import RegionProfile, extract_profile
 
 Token = dict[str, Any]
+
+
+@dataclass(frozen=True)
+class IdentityBatchPipeline:
+    regions: tuple[str, ...]
+    localization_kind: str
+    mrz_region: str
+    mrz_profile: MrzProfile
+    reconcile_mapping: dict[str, str]
+
+    def region_profile(self, profile: dict[str, Any], region: str) -> RegionProfile:
+        geometry = profile["regions"][region]
+        return RegionProfile(geometry["data_crop"], geometry["field_rois"])
+
+
+def passport_batch_pipeline() -> IdentityBatchPipeline:
+    return IdentityBatchPipeline(
+        ("data_page",),
+        "mrz",
+        "data_page",
+        PASSPORT,
+        {
+            "surname": "surname",
+            "name": "given_names",
+            "passport_number": "document_number",
+            "date_of_birth": "date_of_birth",
+            "sex": "sex",
+            "date_of_expiry": "date_of_expiry",
+        },
+    )
+
+
+def id_card_batch_pipeline() -> IdentityBatchPipeline:
+    return IdentityBatchPipeline(
+        ("front", "back"),
+        "docaligner",
+        "back",
+        ID_CARD,
+        {
+            "surname": "surname",
+            "name": "given_names",
+            "card_number": "document_number",
+            "pinfl": "pinfl",
+            "date_of_birth": "date_of_birth",
+            "sex": "sex",
+            "citizenship": "nationality",
+            "date_of_expiry": "date_of_expiry",
+        },
+    )
 
 
 class DocumentPipelineError(Exception):

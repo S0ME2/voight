@@ -80,6 +80,50 @@ class SettingsTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "only on CPU"):
                 Settings.from_env()
 
+    def test_gpu_recognition_acceleration_requires_gpu_and_valid_precision(self):
+        with patch.dict(os.environ, {"TEXT_RECOGNITION_PRECISION": "fp16"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "require RUNTIME_TARGET=gpu"):
+                Settings.from_env()
+        with patch.dict(os.environ, {"RUNTIME_TARGET": "gpu", "TEXT_RECOGNITION_PRECISION": "int8"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "must be 'fp32' or 'fp16'"):
+                Settings.from_env()
+        with patch.dict(
+            os.environ,
+            {
+                "RUNTIME_TARGET": "gpu",
+                "TEXT_RECOGNITION_ENABLE_HPI": "true",
+                "TEXT_RECOGNITION_USE_TENSORRT": "true",
+                "TEXT_RECOGNITION_PRECISION": "fp16",
+            },
+            clear=True,
+        ):
+            settings = Settings.from_env()
+        self.assertTrue(settings.runtime.text_recognition_enable_hpi)
+        self.assertTrue(settings.runtime.text_recognition_use_tensorrt)
+        self.assertEqual("fp16", settings.runtime.text_recognition_precision)
+
+    def test_model_backends_and_names_are_selected_in_one_place(self):
+        with patch.dict(
+            os.environ,
+            {
+                "TEXT_DETECTOR_BACKEND": "paddle",
+                "TEXT_DETECTOR_MODEL": "detector-x",
+                "TEXT_RECOGNIZER_BACKEND": "custom",
+                "TEXT_RECOGNIZER_MODEL": "recognizer-y",
+                "DOCUMENT_LOCALIZER_BACKEND": "document-z",
+                "MRZ_LOCALIZER_BACKEND": "mrz-localizer-z",
+                "MRZ_RECOGNIZER_BACKEND": "mrz-recognizer-z",
+            },
+            clear=True,
+        ):
+            settings = Settings.from_env()
+        self.assertEqual("detector-x", settings.models.text_detector.model)
+        self.assertEqual("custom", settings.models.text_recognizer.backend)
+        self.assertEqual("recognizer-y", settings.models.text_recognizer.model)
+        self.assertEqual("document-z", settings.models.localization.document_backend)
+        self.assertEqual("mrz-localizer-z", settings.models.localization.mrz_backend)
+        self.assertEqual("mrz-recognizer-z", settings.models.mrz.recognizer_backend)
+
 
 if __name__ == "__main__":
     unittest.main()

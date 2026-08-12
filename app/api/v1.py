@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 import zipfile
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import PurePosixPath
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+import anyio
 
 from app.api.schemas import OcrBatchResponse, OcrResponse
 from app.artifacts import create_batch_artifact_run, create_child_artifact_run, save_input
@@ -34,8 +37,10 @@ from app.documents.identity import (
     _reconcile,
     _required_validation,
     _required_warnings,
+    id_card_batch_pipeline,
+    passport_batch_pipeline,
 )
-from app.documents.mrz import ID_CARD, PASSPORT, parse as parse_mrz
+from app.documents.mrz import parse as parse_mrz
 from app.documents.profiles import load_document_profile
 from app.inference import ProfileBatchItem, QueueFullError, ResourceExhaustedError
 from app.models import Models
@@ -47,6 +52,34 @@ from app.uploads import UploadedDocument, document_from_bytes, image_from_docume
 class LogicalInput:
     input: DocumentInput
     files: tuple[UploadedDocument, ...]
+
+
+class AsyncInferenceGate:
+    """Own `/v1` admission: at most ``limit`` admitted requests, one executing."""
+
+    def __init__(self, limit: int):
+        self.limit = limit
+        self._admitted = 0
+        self._admission_lock = asyncio.Lock()
+        self._execution_lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def claim(self):
+        async with self._admission_lock:
+            if self._admitted >= self.limit:
+                raise QueueFullError("inference queue is full")
+            self._admitted += 1
+        try:
+            async with self._execution_lock:
+                yield
+        finally:
+            async with self._admission_lock:
+                self._admitted -= 1
+
+    async def run(self, work):
+        async with self.claim():
+            # Only the active request occupies AnyIO's framework-managed worker.
+            return await anyio.to_thread.run_sync(work, abandon_on_cancel=False)
 
 
 def _error(code: ErrorCode, detail: str, status_code: int = 422) -> HTTPException:
@@ -192,21 +225,16 @@ def _run_batch(inputs: list[LogicalInput], models: Models, settings: Settings) -
         else:
             profile_path = settings.profiles.passport if logical.input.document_type == DocumentType.PASSPORT else settings.profiles.id_card
             document_profile = load_document_profile(profile_path)
-            region_names = ("data_page",) if logical.input.document_type == DocumentType.PASSPORT else ("front", "back")
-            regions = [(region, file, RegionProfile(document_profile["regions"][region]["data_crop"], document_profile["regions"][region]["field_rois"]), int(document_profile["canonical_size"]["width"]), int(document_profile["canonical_size"]["height"]), _parse_visible, _required_warnings(document_profile, region)) for region, file in zip(region_names, decoded_files)]
+            pipeline = passport_batch_pipeline() if logical.input.document_type == DocumentType.PASSPORT else id_card_batch_pipeline()
+            regions = [(region, file, pipeline.region_profile(document_profile, region), int(document_profile["canonical_size"]["width"]), int(document_profile["canonical_size"]["height"]), _parse_visible, _required_warnings(document_profile, region)) for region, file in zip(pipeline.regions, decoded_files)]
         for region, file, profile, width, height, parser, validator in regions:
             image = file.image
             writer = create_child_artifact_run(artifacts, len(jobs), file.filename)
             save_input(writer, file.data, file.filename, file.content_type, file.extension, image, source_filename=file.source_filename, archive_path=file.archive_path)
             item_id = f"{index}:{region}"
-            kind = "mrz" if logical.input.document_type == DocumentType.PASSPORT else "docaligner"
-            mrz_profile = (
-                PASSPORT
-                if logical.input.document_type == DocumentType.PASSPORT
-                else ID_CARD
-                if logical.input.document_type == DocumentType.ID_CARD and region == "back"
-                else None
-            )
+            pipeline = None if logical.input.document_type == DocumentType.DRIVING_LICENSE else (passport_batch_pipeline() if logical.input.document_type == DocumentType.PASSPORT else id_card_batch_pipeline())
+            kind = "docaligner" if pipeline is None else pipeline.localization_kind
+            mrz_profile = pipeline.mrz_profile if pipeline and region == pipeline.mrz_region else None
             jobs.append(
                 ProfileBatchItem(
                     item_id=item_id,
@@ -226,7 +254,12 @@ def _run_batch(inputs: list[LogicalInput], models: Models, settings: Settings) -
                         else None
                     ),
                     mrz_profile=mrz_profile,
-                    probe_mrz=logical.input.document_type == DocumentType.ID_CARD,
+                    probe_mrz=logical.input.document_type == DocumentType.ID_CARD and region == "back",
+                    mrz_fallback_for=(
+                        f"{index}:back"
+                        if logical.input.document_type == DocumentType.ID_CARD and region == "front"
+                        else None
+                    ),
                 )
             )
             owners.append((index, region, document_profile, logical.input.document_type))
@@ -279,12 +312,10 @@ def _run_batch(inputs: list[LogicalInput], models: Models, settings: Settings) -
                 values, report = outcome.result
                 fields.update(_field_results(profile, region, values, report))
                 warnings.extend(report["validation_warnings"])
-            mrz_region = "data_page" if logical.input.document_type == DocumentType.PASSPORT else "back"
+            pipeline = passport_batch_pipeline() if logical.input.document_type == DocumentType.PASSPORT else id_card_batch_pipeline()
+            mrz_region = pipeline.mrz_region
             mrz = parse_mrz(regions[mrz_region][0].mrz_text or "", logical.input.document_type.value)
-            mapping = {"surname": "surname", "name": "given_names", "date_of_birth": "date_of_birth", "sex": "sex", "date_of_expiry": "date_of_expiry", "passport_number" if logical.input.document_type == DocumentType.PASSPORT else "card_number": "document_number"}
-            if logical.input.document_type == DocumentType.ID_CARD:
-                mapping.update({"pinfl": "pinfl", "citizenship": "nationality"})
-            validations = [_required_validation(profile, fields)] + _reconcile(fields, mrz.fields, mapping)
+            validations = [_required_validation(profile, fields)] + _reconcile(fields, mrz.fields, pipeline.reconcile_mapping)
             if not mrz.raw_lines:
                 warnings.append("MRZ was not found" + (" on ID-card back" if logical.input.document_type == DocumentType.ID_CARD else ""))
             elif any(validation.status.value == "failed" for validation in mrz.validations):
@@ -302,38 +333,45 @@ def _run_batch(inputs: list[LogicalInput], models: Models, settings: Settings) -
 
 def create_v1_router(settings: Settings, models: Models) -> APIRouter:
     router = APIRouter(prefix="/v1")
+    gate = AsyncInferenceGate(settings.runtime.queue_limit)
+
+    async def run(inputs: list[LogicalInput]) -> OcrBatchResponse:
+        try:
+            return await gate.run(lambda: _run_batch(inputs, models, settings))
+        except QueueFullError as exc:
+            raise _error(ErrorCode.QUEUE_FULL, str(exc), 503) from exc
 
     @router.post("/ocr/passport", response_model=OcrResponse)
     async def passport(image: UploadFile = File(...)) -> OcrResponse:
-        return _single(_run_batch(_image_inputs(DocumentType.PASSPORT, [await _read(image, settings)]), models, settings))
+        return _single(await run(_image_inputs(DocumentType.PASSPORT, [await _read(image, settings)])))
 
     @router.post("/ocr/id-card", response_model=OcrResponse)
     async def id_card(front: UploadFile = File(...), back: UploadFile = File(...)) -> OcrResponse:
         files = (await _read(front, settings), await _read(back, settings))
-        response = _run_batch([LogicalInput(DocumentInput(document_type=DocumentType.ID_CARD, front=files[0].filename or "front", back=files[1].filename or "back"), files)], models, settings)
+        response = await run([LogicalInput(DocumentInput(document_type=DocumentType.ID_CARD, front=files[0].filename or "front", back=files[1].filename or "back"), files)])
         return _single(response)
 
     @router.post("/ocr/driving-license", response_model=OcrResponse)
     async def driving_license(image: UploadFile = File(...)) -> OcrResponse:
-        return _single(_run_batch(_image_inputs(DocumentType.DRIVING_LICENSE, [await _read(image, settings)]), models, settings))
+        return _single(await run(_image_inputs(DocumentType.DRIVING_LICENSE, [await _read(image, settings)])))
 
     @router.post("/ocr/passport/batch", response_model=OcrBatchResponse)
     async def passport_batch(images: BatchUploads = [], archive: OptionalUpload = None) -> OcrBatchResponse:
         files = [await _read(file, settings) for file in images]
         if archive is not None:
             files.extend(_safe_entries(await _read(archive, settings), settings))
-        return _run_batch(_image_inputs(DocumentType.PASSPORT, files), models, settings)
+        return await run(_image_inputs(DocumentType.PASSPORT, files))
 
     @router.post("/ocr/id-card/batch", response_model=OcrBatchResponse)
     async def id_card_batch(archive: UploadFile = File(...)) -> OcrBatchResponse:
-        return _run_batch(_id_archive(await _read(archive, settings), settings), models, settings)
+        return await run(_id_archive(await _read(archive, settings), settings))
 
     @router.post("/ocr/driving-license/batch", response_model=OcrBatchResponse)
     async def driving_license_batch(images: BatchUploads = [], archive: OptionalUpload = None) -> OcrBatchResponse:
         files = [await _read(file, settings) for file in images]
         if archive is not None:
             files.extend(_safe_entries(await _read(archive, settings), settings))
-        return _run_batch(_image_inputs(DocumentType.DRIVING_LICENSE, files), models, settings)
+        return await run(_image_inputs(DocumentType.DRIVING_LICENSE, files))
 
     @router.get("/health/live")
     async def live() -> dict[str, str]:

@@ -49,23 +49,24 @@ class RealCpuPaddleBatchingTests(unittest.TestCase):
         detection_image = cv2.resize(source, (320, 240))
         recognition_image = cv2.resize(source[100:220, 100:500], (240, 48))
         cases = (
-            (models.text_detector(), detection_image, "dt_polys"),
-            (models.text_recognizer(), recognition_image, "rec_text"),
+            (models.text_detector(), detection_image),
+            (models.text_recognizer(), recognition_image),
         )
-        for model, image, key in cases:
-            predictor = model.paddlex_predictor
+        for adapter, image in cases:
+            predictor = adapter.model.paddlex_predictor
             spy = RunnerSpy(predictor.runner)
             predictor.runner = spy
-            batched = model.predict(input=[image] * 10, batch_size=4)
-            single = model.predict(input=[image], batch_size=1)[0]
-            self.assertEqual(10, len(batched))
-            self.assertEqual([4, 4, 2], spy.batch_sizes[:3])
-            if key == "dt_polys":
-                np.testing.assert_allclose(batched[0][key], single[key], atol=1)
-                np.testing.assert_allclose(batched[-1][key], single[key], atol=1)
+            method = adapter.detect_batch if hasattr(adapter, "detect_batch") else adapter.recognize_batch
+            batched = method([image] * 2)
+            single = method([image])[0]
+            self.assertEqual(2, len(batched))
+            self.assertEqual(2, spy.batch_sizes[0])
+            if hasattr(single, "regions"):
+                np.testing.assert_allclose(batched[0].regions[0].polygon, single.regions[0].polygon, atol=1)
+                np.testing.assert_allclose(batched[-1].regions[0].polygon, single.regions[0].polygon, atol=1)
             else:
-                self.assertEqual(single[key], batched[0][key])
-                self.assertEqual(single[key], batched[-1][key])
+                self.assertEqual(single.text, batched[0].text)
+                self.assertEqual(single.text, batched[-1].text)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,8 @@ import time
 
 import numpy as np
 
+from app.inference.contracts import LocalizationResult
+
 
 def _engine_input_name(engine: Any) -> str:
     return next(iter(engine.input_infos))
@@ -45,7 +47,7 @@ class DocAlignerBatchLocalizer:
     def providers(self) -> list[str]:
         return list(self.engine.providers)
 
-    def predict_batch(self, images: Sequence[np.ndarray]) -> list[dict[str, Any]]:
+    def localize_batch(self, images: Sequence[np.ndarray]) -> list[LocalizationResult]:
         infos = [
             self.preprocess(
                 img=image,
@@ -63,16 +65,15 @@ class DocAlignerBatchLocalizer:
         if heatmaps.shape[0] != len(images):
             raise ValueError("DocAligner returned a different batch dimension")
         return [
-            {
-                "corners": np.asarray(
+            LocalizationResult(
+                np.asarray(
                     self.postprocess(
                         preds=heatmaps[index : index + 1],
                         imgs_size=info["img_size_ori"],
                     ),
                     dtype=np.float32,
-                ),
-                "tensor_batch_size": int(tensor.shape[0]),
-            }
+                )
+            )
             for index, info in enumerate(infos)
         ]
 
@@ -88,7 +89,7 @@ class MrzScannerBatchLocalizer:
     def providers(self) -> list[str]:
         return list(self.engine.providers)
 
-    def predict_batch(self, images: Sequence[np.ndarray]) -> list[dict[str, Any]]:
+    def localize_batch(self, images: Sequence[np.ndarray]) -> list[LocalizationResult]:
         infos = [self.inference.preprocess(image, normalize=True) for image in images]
         input_name = _engine_input_name(self.engine)
         tensor = np.concatenate([info[0][input_name] for info in infos], axis=0)
@@ -100,13 +101,12 @@ class MrzScannerBatchLocalizer:
         if heatmaps.shape[0] != len(images):
             raise ValueError("MRZScanner returned a different batch dimension")
         return [
-            {
-                "mrz_polygon": self.inference.postprocess(
+            LocalizationResult(
+                np.asarray(self.inference.postprocess(
                     hmap=heatmaps[index],
                     img_size=info[1],
                     shift=info[2],
-                ),
-                "tensor_batch_size": int(tensor.shape[0]),
-            }
+                ), dtype=np.float32)
+            )
             for index, info in enumerate(infos)
         ]

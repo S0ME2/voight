@@ -20,6 +20,7 @@ import numpy as np
 from app.artifacts import ArtifactWriter
 from app.documents.identity import extract_id_card, extract_passport
 from app.inference.batch import BatchedOcr, OcrSample
+from app.inference.contracts import DetectedTextRegion, DetectedTextRegions, RecognitionResult
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -117,18 +118,14 @@ def extraction_evidence() -> dict[str, Any]:
 
 
 class _Detector:
-    def predict(self, *, input: list[np.ndarray], batch_size: int) -> list[dict[str, Any]]:
-        images = input
-        assert batch_size == len(images)
+    def detect_batch(self, images: list[np.ndarray]) -> list[DetectedTextRegions]:
         polygon = np.float32([[5, 5], [35, 5], [35, 20], [5, 20]])
-        return [{"dt_polys": [polygon]} for _ in images]
+        return [DetectedTextRegions((DetectedTextRegion(polygon),)) for _ in images]
 
 
 class _Recognizer:
-    def predict(self, *, input: list[np.ndarray], batch_size: int) -> list[dict[str, Any]]:
-        images = input
-        assert batch_size == len(images)
-        return [{"rec_text": "OK", "rec_score": 0.9} for _ in images]
+    def recognize_batch(self, images: list[np.ndarray]) -> list[RecognitionResult]:
+        return [RecognitionResult("OK", 0.9) for _ in images]
 
 
 def _measure(batch_size: int, repeats: int) -> dict[str, Any]:

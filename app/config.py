@@ -74,13 +74,44 @@ class RuntimeSettings:
     text_recognition_batch_size: int = 32
     text_recognition_processes: int = 1
     gpu_id: int = 0
+    text_recognition_enable_hpi: bool = False
+    text_recognition_use_tensorrt: bool = False
+    text_recognition_precision: str = "fp32"
+    mrz_recognition_batch_size: int = 16
+    text_recognition_packing: str = "sequential"
+
+
+@dataclass(frozen=True)
+class TextModelSettings:
+    backend: str
+    model: str
+
+
+@dataclass(frozen=True)
+class LocalizationModelSettings:
+    document_backend: str = "docaligner"
+    mrz_backend: str = "mrzscanner"
+
+
+@dataclass(frozen=True)
+class MrzModelSettings:
+    recognizer_backend: str = "generic-paddle"
+    recognizer_model: str = "20250221"
 
 
 @dataclass(frozen=True)
 class ModelSettings:
-    """Pinned model directory; ``None`` preserves the legacy model lookup."""
+    """Typed model selections; ``directory=None`` preserves cached lookup."""
 
     directory: Path | None = None
+    text_detector: TextModelSettings = field(
+        default_factory=lambda: TextModelSettings("paddle", "PP-OCRv6_medium_det")
+    )
+    text_recognizer: TextModelSettings = field(
+        default_factory=lambda: TextModelSettings("paddle", "PP-OCRv6_medium_rec")
+    )
+    localization: LocalizationModelSettings = field(default_factory=LocalizationModelSettings)
+    mrz: MrzModelSettings = field(default_factory=MrzModelSettings)
 
 
 @dataclass(frozen=True)
@@ -112,6 +143,16 @@ class Settings:
             raise ValueError("GPU_ID must be zero or greater")
         if self.runtime.target != "cpu" and self.runtime.text_recognition_processes != 1:
             raise ValueError("TEXT_RECOGNITION_PROCESSES may exceed one only on CPU")
+        if self.runtime.text_recognition_precision not in {"fp32", "fp16"}:
+            raise ValueError("TEXT_RECOGNITION_PRECISION must be 'fp32' or 'fp16'")
+        if self.runtime.text_recognition_packing not in {"sequential", "aspect-ratio"}:
+            raise ValueError("TEXT_RECOGNITION_PACKING must be 'sequential' or 'aspect-ratio'")
+        if self.runtime.target == "cpu" and (
+            self.runtime.text_recognition_enable_hpi
+            or self.runtime.text_recognition_use_tensorrt
+            or self.runtime.text_recognition_precision != "fp32"
+        ):
+            raise ValueError("text-recognition HPI, TensorRT, and FP16 require RUNTIME_TARGET=gpu")
 
         positive = {
             "CPU_THREADS": self.runtime.cpu_threads,
@@ -119,6 +160,7 @@ class Settings:
             "LOCALIZATION_BATCH_SIZE": self.runtime.localization_batch_size,
             "TEXT_DETECTION_BATCH_SIZE": self.runtime.text_detection_batch_size,
             "TEXT_RECOGNITION_BATCH_SIZE": self.runtime.text_recognition_batch_size,
+            "MRZ_RECOGNITION_BATCH_SIZE": self.runtime.mrz_recognition_batch_size,
             "TEXT_RECOGNITION_PROCESSES": self.runtime.text_recognition_processes,
             "BATCH_MAX_FILES": self.batch.max_files,
             "BATCH_MAX_FILE_BYTES": self.batch.max_file_bytes,
@@ -140,6 +182,19 @@ class Settings:
                 raise ValueError(f"{name} does not exist: {path}")
         if self.models.directory is not None and not self.models.directory.is_dir():
             raise ValueError(f"MODEL_DIR does not exist: {self.models.directory}")
+        selections = {
+            "TEXT_DETECTOR_BACKEND": self.models.text_detector.backend,
+            "TEXT_DETECTOR_MODEL": self.models.text_detector.model,
+            "TEXT_RECOGNIZER_BACKEND": self.models.text_recognizer.backend,
+            "TEXT_RECOGNIZER_MODEL": self.models.text_recognizer.model,
+            "DOCUMENT_LOCALIZER_BACKEND": self.models.localization.document_backend,
+            "MRZ_LOCALIZER_BACKEND": self.models.localization.mrz_backend,
+            "MRZ_RECOGNIZER_BACKEND": self.models.mrz.recognizer_backend,
+            "MRZ_RECOGNIZER_MODEL": self.models.mrz.recognizer_model,
+        }
+        for name, value in selections.items():
+            if not value.strip():
+                raise ValueError(f"{name} cannot be empty")
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -192,12 +247,37 @@ class Settings:
                 text_recognition_batch_size=_positive_int(
                     "TEXT_RECOGNITION_BATCH_SIZE", 32
                 ),
+                mrz_recognition_batch_size=_positive_int(
+                    "MRZ_RECOGNITION_BATCH_SIZE", 16
+                ),
                 text_recognition_processes=_positive_int(
                     "TEXT_RECOGNITION_PROCESSES", 1
                 ),
                 gpu_id=int(os.getenv("GPU_ID", "0")),
+                text_recognition_enable_hpi=_bool("TEXT_RECOGNITION_ENABLE_HPI", False),
+                text_recognition_use_tensorrt=_bool("TEXT_RECOGNITION_USE_TENSORRT", False),
+                text_recognition_precision=os.getenv("TEXT_RECOGNITION_PRECISION", "fp32").strip().lower(),
+                text_recognition_packing=os.getenv("TEXT_RECOGNITION_PACKING", "sequential").strip().lower(),
             ),
-            models=ModelSettings(_optional_path("MODEL_DIR")),
+            models=ModelSettings(
+                _optional_path("MODEL_DIR"),
+                TextModelSettings(
+                    os.getenv("TEXT_DETECTOR_BACKEND", "paddle").strip().lower(),
+                    os.getenv("TEXT_DETECTOR_MODEL", "PP-OCRv6_medium_det").strip(),
+                ),
+                TextModelSettings(
+                    os.getenv("TEXT_RECOGNIZER_BACKEND", "paddle").strip().lower(),
+                    os.getenv("TEXT_RECOGNIZER_MODEL", "PP-OCRv6_medium_rec").strip(),
+                ),
+                LocalizationModelSettings(
+                    os.getenv("DOCUMENT_LOCALIZER_BACKEND", "docaligner").strip().lower(),
+                    os.getenv("MRZ_LOCALIZER_BACKEND", "mrzscanner").strip().lower(),
+                ),
+                MrzModelSettings(
+                    os.getenv("MRZ_RECOGNIZER_BACKEND", "generic-paddle").strip().lower(),
+                    os.getenv("MRZ_RECOGNIZER_MODEL", "20250221").strip(),
+                ),
+            ),
             profiles=ProfileSettings(
                 _path(
                     "PASSPORT_PROFILE",

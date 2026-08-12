@@ -33,6 +33,17 @@ def crop_normalized_roi(image: np.ndarray, roi: dict[str, float]) -> np.ndarray:
     return image[top:bottom, left:right].copy()
 
 
+def roi_for_point(
+    rois: dict[str, dict[str, float]], width: int, height: int, x: float, y: float
+) -> str | None:
+    """Return the first configured ROI containing a point in image pixels."""
+    for name, roi in rois.items():
+        x1, y1, x2, y2 = normalized_roi_to_pixels(roi, width, height)
+        if x1 <= x <= x2 and y1 <= y <= y2:
+            return name
+    return None
+
+
 def assign_tokens_to_rois(
     tokens: list[dict[str, Any]],
     rois: dict[str, dict[str, float]],
@@ -40,16 +51,12 @@ def assign_tokens_to_rois(
     height: int,
     min_overlap: float,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
-    pixel_rois = {name: normalized_roi_to_pixels(roi, width, height) for name, roi in rois.items()}
     assignments = {name: [] for name in rois}
     unassigned = []
     for token in tokens:
         center_x = float(token.get("center_x", (float(token["x1"]) + float(token["x2"])) / 2))
         center_y = float(token.get("center_y", (float(token["y1"]) + float(token["y2"])) / 2))
-        best_name = next(
-            (name for name, (x1, y1, x2, y2) in pixel_rois.items() if x1 <= center_x <= x2 and y1 <= center_y <= y2),
-            None,
-        )
+        best_name = roi_for_point(rois, width, height, center_x, center_y)
         if best_name is None:
             unassigned.append(token)
         else:

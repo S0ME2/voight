@@ -42,7 +42,16 @@ class Measurement:
     localization_tensor_batches: dict[str, list[int]]
     detection_tensor_batches: list[int]
     recognition_tensor_batches: list[int]
+    detected_line_count: int | None
+    recognition_candidate_count: int | None
+    filtered_before_recognition_count: int | None
+    recognition_share_of_total: float | None
     stage_seconds: dict[str, float]
+    mrz_recognition_tensor_batches: list[int] | None = None
+    id_card_front_fallback_scan_count: int | None = None
+    recognition_packing_strategy: str | None = None
+    succeeded: int | None = None
+    failed: int | None = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -96,6 +105,7 @@ def stage_seconds(diagnostics: dict[str, Any], total: float) -> dict[str, float]
         "text_detection": float(diagnostics.get("text_detection", {}).get("wall_seconds", 0.0)),
         "text_line_crops": float(diagnostics.get("line_crop_seconds", 0.0)),
         "text_recognition": float(diagnostics.get("text_recognition", {}).get("wall_seconds", 0.0)),
+        "mrz_recognition": float(diagnostics.get("mrz_recognition", {}).get("wall_seconds", 0.0)),
         "ocr_result_unpack": float(diagnostics.get("result_unpack_seconds", 0.0)),
         "result_assembly": float(pipeline.get("result_assembly_seconds", 0.0)),
     }
@@ -115,10 +125,10 @@ def post(args: argparse.Namespace, kind: str, count: int, repeat: int) -> Measur
     try:
         response = requests.post(url, files=files, timeout=args.timeout)
     except requests.RequestException as error:
-        return Measurement(args.runtime, kind, count, repeat, time.perf_counter() - started, None, "request_failed", str(error), {}, [], [], {})
+        return Measurement(args.runtime, kind, count, repeat, time.perf_counter() - started, None, "request_failed", str(error), {}, [], [], None, None, None, None, {})
     client_total = time.perf_counter() - started
     if not response.ok:
-        return Measurement(args.runtime, kind, count, repeat, client_total, None, "request_failed", response.text[:1000], {}, [], [], {})
+        return Measurement(args.runtime, kind, count, repeat, client_total, None, "request_failed", response.text[:1000], {}, [], [], None, None, None, None, {})
     try:
         payload = response.json()
         diagnostics = payload["diagnostics"]
@@ -128,9 +138,24 @@ def post(args: argparse.Namespace, kind: str, count: int, repeat: int) -> Measur
         localization = tensor_batches(diagnostics.get("localization"))
         detection = tensor_batches(diagnostics.get("text_detection")).get("default", [])
         recognition = tensor_batches(diagnostics.get("text_recognition")).get("default", [])
+        line_filter = diagnostics.get("line_filter", {})
+        recognition_seconds = float(diagnostics.get("text_recognition", {}).get("wall_seconds", 0.0))
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
-        return Measurement(args.runtime, kind, count, repeat, client_total, None, "invalid_response", str(error), {}, [], [], {})
-    return Measurement(args.runtime, kind, count, repeat, client_total, server_total, "ok", None, localization, detection, recognition, stage_seconds(diagnostics, server_total))
+        return Measurement(args.runtime, kind, count, repeat, client_total, None, "invalid_response", str(error), {}, [], [], None, None, None, None, {})
+    return Measurement(
+        args.runtime, kind, count, repeat, client_total, server_total, "ok", None,
+        localization, detection, recognition,
+        int(line_filter.get("detected_line_count", 0)),
+        int(line_filter.get("recognition_candidate_count", 0)),
+        int(line_filter.get("filtered_before_recognition_count", 0)),
+        recognition_seconds / server_total if server_total else None,
+        stage_seconds(diagnostics, server_total),
+        tensor_batches(diagnostics.get("mrz_recognition")).get("default", []),
+        int(diagnostics.get("id_card_mrz_probe", {}).get("front_fallback_scanned", 0)),
+        diagnostics.get("text_recognition", {}).get("packing_strategy"),
+        int(payload["succeeded"]),
+        int(payload["failed"]),
+    )
 
 
 def proves_batching(row: Measurement) -> bool:
@@ -155,6 +180,11 @@ def summarize(rows: list[Measurement]) -> list[dict[str, Any]]:
                 "localization_tensor_batches": values[0].localization_tensor_batches,
                 "detection_tensor_batches": values[0].detection_tensor_batches,
                 "recognition_tensor_batches": values[0].recognition_tensor_batches,
+                "mrz_recognition_tensor_batches": values[0].mrz_recognition_tensor_batches,
+                "id_card_front_fallback_scan_count": values[0].id_card_front_fallback_scan_count,
+                "recognition_packing_strategy": values[0].recognition_packing_strategy,
+                "succeeded": sum(row.succeeded or 0 for row in values),
+                "failed": sum(row.failed or 0 for row in values),
                 "total_stage_seconds": {stage: sum(row.stage_seconds.get(stage, 0.0) for row in values) for stage in values[0].stage_seconds},
             })
     return summary

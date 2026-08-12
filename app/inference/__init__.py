@@ -2,7 +2,6 @@
 
 from app.inference.batch import (
     BatchedOcr,
-    InferenceGate,
     OcrSample,
     ProfileBatchItem,
     ProfileBatchRunner,
@@ -12,7 +11,6 @@ from app.inference.batch import (
 
 __all__ = [
     "BatchedOcr",
-    "InferenceGate",
     "OcrSample",
     "ProfileBatchItem",
     "ProfileBatchRunner",
