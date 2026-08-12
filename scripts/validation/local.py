@@ -23,7 +23,7 @@ from app.inference.batch import BatchedOcr, OcrSample
 from app.inference.contracts import DetectedTextRegion, DetectedTextRegions, RecognitionResult
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 TRUTH = json.loads((ROOT / "annotations/evaluation_ground_truth.json").read_text())["samples"]
 PASSPORT_PROFILE = ROOT / "config/documents/uz_passport/profile.json"
 ID_PROFILE = ROOT / "config/documents/uz_id_card/profile.json"

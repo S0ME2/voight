@@ -176,6 +176,7 @@ class V1TransportTests(unittest.TestCase):
             "/v1/health/live", "/v1/health/ready",
         ):
             self.assertIn(path, paths)
+        self.assertTrue(all(path.startswith("/v1/") for path in paths))
         self.assertEqual("#/components/schemas/OcrBatchResponse", paths["/v1/ocr/passport/batch"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"])
         request = paths["/v1/ocr/passport/batch"]["post"]["requestBody"]["content"]["multipart/form-data"]["schema"]
         body = schema["components"]["schemas"][request["$ref"].split("/")[-1]]

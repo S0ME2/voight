@@ -1,16 +1,12 @@
 import re
-import time
 from dataclasses import dataclass
 from typing import Any
 
 import cv2
 import numpy as np
 
-from app.artifacts import ArtifactWriter
-from app.config import MrzSettings
 from app.contracts import MrzResult, ValidationResult, ValidationStatus
-from app.imaging import draw_polygon, order_corners
-from app.ocr import recognize
+from app.imaging import order_corners
 
 MRZ_ALLOWED_RE = re.compile(r"^[A-Z0-9<]+$")
 VALID_MRZ_LENGTHS = (30, 36, 44)
@@ -226,45 +222,3 @@ def parse(text: str, document_type: str) -> MrzResult:
             ),
         ]
     return MrzResult(raw_lines=lines, fields=fields, validations=validations)
-
-
-def extract(
-    image: np.ndarray,
-    detector: Any,
-    ocr: Any,
-    artifacts: ArtifactWriter,
-    settings: MrzSettings,
-    profile: MrzProfile,
-    *,
-    started_total: float | None = None,
-    initial_timings: dict[str, Any] | None = None,
-) -> tuple[str, dict[str, Any]]:
-    timings: dict[str, Any] = dict(initial_timings or {})
-    total = started_total if started_total is not None else time.perf_counter()
-    started = time.perf_counter()
-    detected = detector(image, do_center_crop=False)
-    timings["mrz_detection_seconds"] = time.perf_counter() - started
-    polygon = np.asarray(detected["mrz_polygon"], dtype=np.float32).reshape(4, 2)
-    artifacts.save_json("01_mrzscanner_result.json", detected)
-    artifacts.save_image("02_mrz_detection.jpg", draw_polygon(image, polygon))
-    started = time.perf_counter()
-    crop, expanded = crop_polygon(image, polygon, settings.polygon_padding_ratio)
-    timings["perspective_crop_seconds"] = time.perf_counter() - started
-    artifacts.save_json("03_mrz_polygons.json", {"detected_polygon": polygon, "expanded_polygon": expanded, "padding_ratio": settings.polygon_padding_ratio})
-    artifacts.save_image("04_mrz_crop.jpg", crop)
-    processed = preprocess(crop, settings.max_side, settings.contrast)
-    artifacts.save_image("05_preprocessed_mrz.png", processed)
-    started = time.perf_counter()
-    tokens = recognize(processed, ocr, artifacts)
-    timings["ocr_seconds"] = time.perf_counter() - started
-    started = time.perf_counter()
-    lines = reconstruct(tokens)
-    selected = select(lines, profile.line_counts)
-    text = "\n".join(line.text for line in selected)
-    timings["reconstruction_seconds"] = time.perf_counter() - started
-    timings["total_seconds"] = time.perf_counter() - total
-    artifacts.save_json("08_ocr_tokens.json", tokens)
-    artifacts.save_json("09_reconstructed_mrz.json", {"all_lines": [line.text for line in lines], "selected_lines": [line.text for line in selected]})
-    artifacts.save_text("10_mrz.txt", text)
-    artifacts.save_json("11_timings.json", timings)
-    return text, timings

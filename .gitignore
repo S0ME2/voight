@@ -12,6 +12,10 @@ logs/
 logs-from-container/
 outputs/
 complexity/results/
+/dataset/
+/.paddlex/
+/models/
+*.bak
 DELETE_ME/
 code.zip
 .coverage

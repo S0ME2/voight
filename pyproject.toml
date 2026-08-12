@@ -1,23 +1,26 @@
 [project]
 name = "voight"
 version = "0.1.0"
-description = "Add your description here"
-readme = "app/README.md"
+description = "Profile-driven OCR API for supported Uzbekistan identity documents"
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "dotenv==0.9.9",
     "fastapi==0.139.2",
-    "fastmrz==2.1.2",
-    "matplotlib==3.11.1",
     "numpy==2.3.5",
     "onnxruntime==1.22.0; sys_platform == 'linux'",
     "paddleocr==3.7.0",
     "paddlepaddle==3.2.2",
     "python-multipart==0.0.32",
     "pyturbojpeg==1.8.3",
-    "requests==2.34.2",
     "uvicorn==0.51.0",
 ]
 
 [dependency-groups]
-dev = []
+dev = [
+    "matplotlib==3.11.1",
+    "requests==2.34.2",
+]
+experiments = [
+    "fastmrz==2.1.2",
+]

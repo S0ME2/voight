@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Create all supported document annotations from JSON-defined layouts."""
+"""Create supported profile annotations from JSON-defined layouts."""
 
 import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.annotation import DEFAULT_LAYOUTS, run
 

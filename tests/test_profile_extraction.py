@@ -6,8 +6,6 @@ from pathlib import Path
 import numpy as np
 
 from app.artifacts import ArtifactWriter
-from app.config import DrivingLicenseSettings
-from app.documents.driving_license import extract as extract_driving_license
 from app.documents.driving_license_fields import parse_fields
 from app.pipeline import RegionProfile, extract_profile, load_region_profile
 from app.roi import assign_tokens_to_rois
@@ -98,34 +96,33 @@ class ProfileExtractionTests(unittest.TestCase):
         )
 
     def test_driving_license_parser_behavior_uses_shared_engine(self):
-        class OcrStub:
-            def predict(self, image, **kwargs):
-                return [
-                    {
-                        "rec_texts": ["1. KARIMOV", "2. ALI"],
-                        "rec_scores": [0.9, 0.8],
-                        "rec_boxes": [[10, 10, 200, 40], [10, 35, 200, 65]],
-                    }
-                ]
-
-        settings = DrivingLicenseSettings(
+        profile = load_region_profile(
             Path("config/driving_license/data_crop.json"),
             Path("config/driving_license/field_rois_crop.json"),
-            1000,
-            630,
-            100,
-            0.3,
-            "stub",
         )
         image = np.zeros((630, 1000, 3), dtype=np.uint8)
-        aligner = lambda **kwargs: [
+        aligner = lambda _image: [
             [100, 100],
             [1099, 100],
             [1099, 729],
             [100, 729],
         ]
-        extracted, report = extract_driving_license(
-            image, aligner, OcrStub(), self.writer, settings
+        tokens = lambda _crop: [
+            {"text": "1. KARIMOV", "score": 0.9, "x1": 10, "y1": 10, "x2": 200, "y2": 40, "center_x": 105, "center_y": 25, "height": 30},
+            {"text": "2. ALI", "score": 0.8, "x1": 10, "y1": 35, "x2": 200, "y2": 65, "center_x": 105, "center_y": 50, "height": 30},
+        ]
+        extracted, report = extract_profile(
+            image,
+            profile,
+            aligner,
+            tokens,
+            parse_fields,
+            lambda _fields: [],
+            self.writer,
+            canonical_width=1000,
+            canonical_height=630,
+            padding=100,
+            min_overlap=0.3,
         )
         self.assertEqual("1. KARIMOV", extracted["surname"])
         self.assertEqual("2. ALI", extracted["given_names"])

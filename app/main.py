@@ -4,7 +4,6 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
-from app.api.routes import create_router
 from app.api.v1 import create_v1_router
 from app.contracts import ErrorCode, ErrorResult
 from app.config import Settings
@@ -26,7 +25,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 close()
 
     app = FastAPI(title="VoightKampff OCR API", version="0.3.0", lifespan=lifespan)
-    app.include_router(create_router(settings, models))
     app.include_router(create_v1_router(settings, models))
 
     @app.exception_handler(HTTPException)

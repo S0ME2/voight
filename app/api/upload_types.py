@@ -30,7 +30,6 @@ SwaggerUploadFile: TypeAlias = Annotated[
     ),
 ]
 
-SingleUpload: TypeAlias = Annotated[SwaggerUploadFile, File()]
 OptionalUpload: TypeAlias = Annotated[SwaggerUploadFile | None, File()]
 BatchUploads: TypeAlias = Annotated[
     list[SwaggerUploadFile],

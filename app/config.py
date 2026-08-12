@@ -78,7 +78,7 @@ class RuntimeSettings:
     text_recognition_use_tensorrt: bool = False
     text_recognition_precision: str = "fp32"
     mrz_recognition_batch_size: int = 16
-    text_recognition_packing: str = "sequential"
+    text_recognition_packing: str = "aspect-ratio"
 
 
 @dataclass(frozen=True)
@@ -257,7 +257,7 @@ class Settings:
                 text_recognition_enable_hpi=_bool("TEXT_RECOGNITION_ENABLE_HPI", False),
                 text_recognition_use_tensorrt=_bool("TEXT_RECOGNITION_USE_TENSORRT", False),
                 text_recognition_precision=os.getenv("TEXT_RECOGNITION_PRECISION", "fp32").strip().lower(),
-                text_recognition_packing=os.getenv("TEXT_RECOGNITION_PACKING", "sequential").strip().lower(),
+                text_recognition_packing=os.getenv("TEXT_RECOGNITION_PACKING", "aspect-ratio").strip().lower(),
             ),
             models=ModelSettings(
                 _optional_path("MODEL_DIR"),

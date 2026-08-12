@@ -1,10 +1,7 @@
 dotenv==0.9.9
 fastapi==0.139.2
-fastmrz==2.1.2
-matplotlib==3.11.1
 numpy==2.3.5
 paddleocr==3.7.0
 python-multipart==0.0.32
 pyturbojpeg==1.8.3
-requests==2.34.2
 uvicorn==0.51.0

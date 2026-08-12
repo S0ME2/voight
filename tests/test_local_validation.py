@@ -1,6 +1,6 @@
 import unittest
 
-from scripts.local_validation import batch_evidence, extraction_evidence
+from scripts.validation.local import batch_evidence, extraction_evidence
 
 
 class LocalValidationTests(unittest.TestCase):

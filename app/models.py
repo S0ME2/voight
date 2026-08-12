@@ -4,23 +4,12 @@ from typing import Any, Callable
 
 from app.config import Settings, TextModelSettings
 
-OCR_MODEL_CONFIG = {
-    "text_detection_model_name": "PP-OCRv6_medium_det",
-    "text_recognition_model_name": "PP-OCRv6_medium_rec",
-    "use_doc_orientation_classify": False,
-    "use_doc_unwarping": False,
-    "use_textline_orientation": False,
-}
 OCR_PREDICT_CONFIG = {
     "text_det_thresh": 0.30,
     "text_det_box_thresh": 0.50,
     "text_det_unclip_ratio": 2.00,
     "text_rec_score_thresh": 0.0,
 }
-TEXT_DETECTION_MODEL_NAME = OCR_MODEL_CONFIG["text_detection_model_name"]
-TEXT_RECOGNITION_MODEL_NAME = OCR_MODEL_CONFIG["text_recognition_model_name"]
-
-
 class Models:
     """The only place heavy runtime models are created and retained."""
 
@@ -34,7 +23,6 @@ class Models:
     ):
         self.settings = settings
         self.text_recognizer_factories = dict(text_recognizer_factories or {})
-        self._ocr: Any | None = None
         self._text_detector: Any | None = None
         self._text_recognizer: Any | None = None
         self._process_text_recognizer: Any | None = None
@@ -60,14 +48,6 @@ class Models:
             self._load_seconds[name] = time.perf_counter() - started
             setattr(self, attribute, current)
         return current
-
-    def ocr(self) -> Any:
-        def load() -> Any:
-            from paddleocr import PaddleOCR
-
-            return PaddleOCR(**OCR_MODEL_CONFIG, device=self._paddle_device())
-
-        return self._get_or_load("_ocr", "ocr", load)
 
     def mrz_scanner(self) -> Any:
         def load() -> Any:
@@ -255,7 +235,6 @@ class Models:
 
     def is_loaded(self, name: str) -> bool:
         attributes = {
-            "ocr": "_ocr",
             "text_detector": "_text_detector",
             "text_recognizer": "_text_recognizer",
             "mrz_scanner": "_mrz_scanner",

@@ -64,7 +64,7 @@ class AnnotationTests(unittest.TestCase):
             self.assertTrue(report["valid"])
             self.assertEqual(json.loads((root / "output" / "profiles" / "uzbekistan_passport.json").read_text())["field_rois"]["number"]["x2"], 0.5)
             self.assertEqual(json.loads((root / "output" / "evaluation_ground_truth.json").read_text())["samples"][sample.key]["expected_fields"]["number"], "AA1")
-            checked = subprocess.run([sys.executable, "scripts/annotate.py", str(root), str(root / "output"), "--check"], capture_output=True, text=True, check=False)
+            checked = subprocess.run([sys.executable, "scripts/dataset/annotate_profiles.py", str(root), str(root / "output"), "--check"], capture_output=True, text=True, check=False)
             self.assertEqual(checked.returncode, 0, checked.stderr)
             self.assertIn('"valid": true', checked.stdout)
 

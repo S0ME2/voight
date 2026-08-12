@@ -1,94 +1,112 @@
-.PHONY: help sync start start-dev zip mibombo clean_start local-validation docker-up docker-up-d docker-down docker-down-v docker-logs docker-logs-clean docker-logs-copy docker-shell docker-ps docker-restart docker-cpu-build docker-cpu-run docker-cpu-up docker-cpu-up-d docker-cpu-test docker-gpu-build docker-gpu-test
+ENV_FILE ?= .env
+COMPOSE = docker compose --env-file $(ENV_FILE)
 
-.SILENT:
+.PHONY: help install run run-dev test check validate env-check \
+	docker-cpu-build docker-cpu-up docker-cpu-up-d docker-cpu-down docker-cpu-logs docker-cpu-shell docker-cpu-test docker-cpu-artifacts-copy docker-cpu-artifacts-clean \
+	docker-gpu-build docker-gpu-up docker-gpu-up-d docker-gpu-down docker-gpu-logs docker-gpu-test \
+	models-cpu models-info models-rebuild-cpu dataset-annotate dataset-summary dataset-validate dataset-export \
+	benchmark-cpu benchmark-recognition clean
 
-help:
-	echo "sync:      Sync locked dependencies with uv"
-	echo "start:     Start the FastAPI server"
-	echo "start-dev: Start the FastAPI server with reload"
-	echo "docker-up:        Build and run the Compose profile selected by .env"
-	echo "docker-up-d:      Build and run it in the background"
-	echo "docker-down:      Stop and remove Compose containers and network"
-	echo "docker-down-v:    docker-down plus the persistent artifact volume"
-	echo "docker-logs:      Follow service logs; docker-logs-clean deletes artifacts"
-	echo "docker-logs-copy: Copy /app/logs from the CPU container to this PC"
-	echo "docker-shell:     Open a shell in the running CPU app container"
-	echo "docker-restart:   Restart the selected Compose profile"
-	echo "docker-cpu-build: Build the CPU image, including pinned model assets"
-	echo "docker-cpu-run:   Alias for docker-up; docker-cpu-up[-d] forces CPU"
-	echo "docker-cpu-test:  Run the CPU test suite in the CPU image"
-	echo "local-validation: Write CPU-only extraction and batch baseline JSON"
-	echo "docker-gpu-build: Build the GPU image on the V100 server only"
-	echo "docker-gpu-test:  Run GPU smoke checks on the V100 server only"
+help: ## Show supported commands
+	@awk 'BEGIN {FS = ":.*## "; print "Voight commands:\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-28s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-sync:
-	uv sync --frozen
+install: ## Install the locked local CPU development environment
+	uv venv --allow-existing
+	uv pip sync --reinstall-package onnxruntime requirements/cpu.lock
 
-start:
-	uv run uvicorn app.main:app --host 0.0.0.0 --port 8888
+run: ## Start the local CPU API on port 8888
+	MODEL_DIR= uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8888
 
-start-dev:
-	uv run uvicorn app.main:app --host 0.0.0.0 --port 8888 --reload
+run-dev: ## Start the local CPU API with reload
+	MODEL_DIR= uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8888 --reload
 
-zip:
-	zip -r code.zip ./app -x "**cache**" "**venv**" "**vscode**" ".**" "**.md**" "dataset/**"
+test: ## Run the complete CPU-safe test suite
+	MODEL_DIR= uv run --no-sync python -m unittest discover -s tests -v
 
-mibombo:
-	echo "No runtime text log is used; OCR artifacts are controlled by LOGGING and LOG_DIR."
+check: ## Compile Python, check the lock, and reject whitespace errors
+	PYTHONDONTWRITEBYTECODE=1 uv run --no-sync python -m compileall -q app scripts tests
+	uv lock --check
+	git diff --check
 
-clean_start: mibombo start
+validate: ## Write the CPU extraction and true-batch baseline
+	MODEL_DIR= uv run --no-sync python -m scripts.validation.local
 
-local-validation:
-	uv run python -m scripts.local_validation
+env-check:
+	@test -f $(ENV_FILE) || { echo "Missing $(ENV_FILE). Run: cp .env.example .env"; exit 2; }
 
-docker-cpu-build:
+docker-cpu-build: ## Build the CPU image with pinned models inside it
 	docker build --target cpu -t voight:cpu .
 
-docker-up:
-	docker compose --env-file .env up --build
+docker-cpu-up: env-check ## Run the built CPU service in the foreground
+	$(COMPOSE) up cpu
 
-docker-up-d:
-	docker compose --env-file .env up --build -d
+docker-cpu-up-d: env-check ## Run the built CPU service in the background
+	$(COMPOSE) up -d cpu
 
-docker-down:
-	docker compose --env-file .env down
+docker-cpu-down: env-check ## Stop the Compose application
+	$(COMPOSE) down
 
-docker-down-v:
-	docker compose --env-file .env down --volumes
+docker-cpu-logs: env-check ## Follow CPU service logs
+	$(COMPOSE) logs --follow cpu
 
-docker-logs:
-	docker compose --env-file .env logs --follow
+docker-cpu-shell: env-check ## Open a shell in the running CPU container
+	$(COMPOSE) exec cpu sh
 
-docker-logs-clean:
-	docker compose --env-file .env exec -T cpu sh -lc 'find /app/logs -mindepth 1 -delete'
+docker-cpu-artifacts-copy: env-check ## Copy persisted container artifacts into outputs/
+	mkdir -p outputs/docker-artifacts
+	$(COMPOSE) cp cpu:/app/logs/. outputs/docker-artifacts/
 
-docker-logs-copy:
-	mkdir -p logs-from-container
-	docker compose --env-file .env cp cpu:/app/logs ./logs-from-container
+docker-cpu-artifacts-clean: env-check ## Delete persisted CPU artifacts after copying anything needed
+	$(COMPOSE) exec -T cpu sh -c 'find /app/logs -mindepth 1 -delete'
 
-docker-shell:
-	docker compose --env-file .env exec cpu sh
-
-docker-ps:
-	docker compose --env-file .env ps
-
-docker-restart:
-	docker compose --env-file .env restart
-
-docker-cpu-run: docker-up
-
-docker-cpu-up:
-	docker compose --env-file .env --profile cpu up --build
-
-docker-cpu-up-d:
-	docker compose --env-file .env --profile cpu up --build -d
-
-docker-cpu-test:
+docker-cpu-test: ## Run CPU contract, batching, API, and model-cache tests in Docker
 	docker build --target cpu-test -t voight:cpu-test .
 	docker run --rm voight:cpu-test
 
-docker-gpu-build:
+docker-gpu-build: ## Build the GPU image on the V100 server only
 	docker build --target gpu -t voight:gpu .
 
-docker-gpu-test:
-	docker compose --env-file .env --profile gpu run --rm gpu python -c 'from app.config import Settings; from app.models import Models; settings = Settings.from_env(); assert settings.runtime.target == "gpu"; print(Models(settings).readiness())'
+docker-gpu-up: env-check ## Run the GPU service on the V100 server only
+	$(COMPOSE) --profile gpu up gpu
+
+docker-gpu-up-d: env-check ## Run the GPU service detached on the V100 server only
+	$(COMPOSE) --profile gpu up -d gpu
+
+docker-gpu-down: env-check ## Stop the Compose application on the GPU server
+	$(COMPOSE) --profile gpu down
+
+docker-gpu-logs: env-check ## Follow GPU service logs
+	$(COMPOSE) --profile gpu logs --follow gpu
+
+docker-gpu-test: env-check ## Run GPU readiness on the V100 server only
+	$(COMPOSE) --profile gpu run --rm gpu python -c 'from app.config import Settings; from app.models import Models; print(Models(Settings.from_env()).readiness())'
+
+models-cpu: docker-cpu-build ## Prepare CPU models by building the image
+
+models-info: ## Print the model manifest baked into the CPU image
+	docker run --rm --entrypoint cat voight:cpu /opt/voight/models/voight-models.json
+
+models-rebuild-cpu: ## Force a fresh CPU dependency and model download
+	docker build --no-cache --target cpu -t voight:cpu .
+
+dataset-annotate: ## Start or resume local ground-truth annotation
+	uv run --no-sync python scripts/dataset/annotate.py
+
+dataset-summary: ## Show local dataset annotation progress
+	uv run --no-sync python scripts/dataset/annotate.py --summary
+
+dataset-validate: ## Validate local dataset structure and annotations
+	uv run --no-sync python scripts/dataset/annotate.py --validate
+
+dataset-export: ## Export local annotations to ignored JSONL output
+	uv run --no-sync python scripts/dataset/annotate.py --export
+
+benchmark-cpu: ## Benchmark a running CPU API with committed fixtures
+	uv run --no-sync python complexity/benchmark_batch_complexity.py --runtime cpu --repeats 3
+
+benchmark-recognition: ## Benchmark cached recognizer batch sizes locally
+	@test -n "$$MODEL_DIR" || { echo "MODEL_DIR must point to a prepared local model cache"; exit 2; }
+	uv run --no-sync python scripts/benchmarking/text_recognition_batch_benchmark.py
+
+clean: ## Remove Python caches only; datasets, models, logs, and outputs are preserved
+	find app scripts tests complexity tools -type d -name __pycache__ -prune -exec rm -r {} +

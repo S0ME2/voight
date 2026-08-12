@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Diagnostic MRZ overlay helper; use scripts/annotate.py for annotations."""
+"""Diagnostic MRZ overlay helper; use dataset/annotate_profiles.py for profiles."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from app.documents.passport_localization import relative_to_mrz_width
 from app.imaging import draw_polygon, order_corners

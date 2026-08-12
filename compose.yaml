@@ -1,16 +1,18 @@
 services:
   cpu:
+    image: voight:cpu
     build:
       context: .
       target: cpu
-    profiles: [cpu]
     env_file: .env
     environment:
       RUNTIME_TARGET: cpu
+      MODEL_DIR: /opt/voight/models
     ports: ["${VOIGHT_PORT:-8000}:8000"]
     volumes: ["voight-artifacts:/app/logs"]
 
   gpu:
+    image: voight:gpu
     build:
       context: .
       target: gpu
@@ -18,6 +20,7 @@ services:
     env_file: .env
     environment:
       RUNTIME_TARGET: gpu
+      MODEL_DIR: /opt/voight/models
       GPU_ID: "${GPU_ID:-0}"
       REQUEST_QUEUE_LIMIT: "${REQUEST_QUEUE_LIMIT:-8}"
       LOCALIZATION_BATCH_SIZE: "${LOCALIZATION_BATCH_SIZE:-2}"

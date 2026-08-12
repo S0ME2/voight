@@ -5,6 +5,10 @@ __pycache__
 .env
 annotation_input
 annotations
+assets
+complexity
+dataset
 logs
 outputs
+logs-from-container
 .codex

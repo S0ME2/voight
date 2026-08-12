@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from app.documents.profiles import load_document_profile
-from scripts.promote_annotations import promote
+from scripts.dataset.promote_profiles import promote
 
 
 ROOT = Path(__file__).resolve().parents[1]

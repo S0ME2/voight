@@ -73,8 +73,6 @@ dotenv==0.9.9
     # via voight
 fastapi==0.139.2
     # via voight
-fastmrz==2.1.2
-    # via voight
 filelock==3.30.2
     # via
     #   huggingface-hub
@@ -181,7 +179,7 @@ onnx==1.22.0
     # via
     #   capybara-docsaid
     #   onnxslim
-onnxruntime==1.22.0 ; sys_platform == 'darwin'
+onnxruntime==1.22.0 ; sys_platform == 'darwin' or sys_platform == 'linux'
     # via capybara-docsaid
     # via capybara-docsaid
 onnxslim==0.1.94
@@ -190,8 +188,6 @@ opencv-contrib-python==4.10.0.84
     # via paddlex
 opencv-python==5.0.0.93
     # via capybara-docsaid
-opencv-python-headless==5.0.0.93
-    # via fastmrz
 opt-einsum==3.3.0
     # via paddlepaddle
 packaging==26.2
@@ -262,8 +258,6 @@ pyparsing==3.3.2
     # via matplotlib
 pypdfium2==5.12.1
     # via paddlex
-pytesseract==0.3.13
-    # via fastmrz
 python-bidi==0.6.11
     # via paddlex
 python-dateutil==2.9.0.post0
@@ -362,5 +356,3 @@ werkzeug==3.1.8
     # via flask
 yarl==1.24.2
     # via aiohttp
-
-onnxruntime==1.22.0 ; sys_platform == "linux"

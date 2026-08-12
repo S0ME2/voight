@@ -85,7 +85,9 @@ def main() -> int:
     if settings.runtime.target != "cpu" or settings.runtime.text_recognition_processes != 1:
         print("set RUNTIME_TARGET=cpu and TEXT_RECOGNITION_PROCESSES=1", file=sys.stderr)
         return 2
-    root = settings.models.directory or Path.home() / ".paddlex"
+    root = settings.models.directory
+    if root is None:
+        raise RuntimeError("MODEL_DIR is required; point it at a prepared Paddle model directory")
     detector_path = root / "official_models" / settings.models.text_detector.model
     if not detector_path.is_dir():
         print(f"local detector is unavailable: {detector_path}", file=sys.stderr)
