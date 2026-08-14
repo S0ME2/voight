@@ -36,15 +36,15 @@ def test_roi_assignment_and_crop():
 def test_document_parser_returns_raw_driving_license_text():
     extracted, _ = parse_fields(
         {
-            "birth_place_and_date": [
+            "place_of_birth": [
                 {"text": "3. TOSHLOQ 19.10.2005", "x1": 0, "center_y": 0}
             ],
             "personal_id": [{"text": "4d. 12345678901234", "x1": 0, "center_y": 0}],
             "license_number": [{"text": "5. AG2742395", "x1": 0, "center_y": 0}],
         }
     )
-    assert extracted["birth_place"] == "3. TOSHLOQ 19.10.2005"
-    assert extracted["birth_date"] is None
+    assert extracted["birth_place"] == "3. TOSHLOQ"
+    assert extracted["birth_date"] == "19.10.2005"
     assert extracted["personal_id"] == "4d. 12345678901234"
     assert extracted["license_number"] == "5. AG2742395"
     lines = reconstruct(

@@ -28,6 +28,7 @@ from app.contracts import (
     TimingResult,
 )
 from app.documents.driving_license_fields import parse_fields as parse_license_fields
+from app.documents.driving_license_fields import split_birth_line
 from app.documents.driving_license_fields import validation_warnings
 from app.documents.identity import (
     DocumentPipelineError,
@@ -178,8 +179,9 @@ def _driving_field_results(values: dict, report: dict) -> dict[str, FieldResult]
     source_names = {
         "surname": ("surname",),
         "given_names": ("given_names", "name"),
-        "birth_place": ("birth_place_and_date", "place_of_birth"),
-        "birth_date": ("date_of_birth",),
+        "patronymic": ("patronymic",),
+        "birth_place": ("birth_place", "place_of_birth"),
+        "birth_date": ("birth_date", "date_of_birth", "birth_place", "place_of_birth"),
         "issue_date": ("issue_date", "date_of_issue"),
         "expiry_date": ("expiry_date", "date_of_expiry"),
         "issued_place": ("issued_place", "place_of_issue"),
@@ -192,12 +194,25 @@ def _driving_field_results(values: dict, report: dict) -> dict[str, FieldResult]
 
     def evidence(name: str, kind: str):
         for source in source_names.get(name, (name,)):
-            if source in report[kind]:
-                return report[kind][source]
+            value = report[kind].get(source)
+            if value:
+                return value
         return [] if kind == "field_raw_text" else None
 
+    def raw_text(name: str) -> list[str]:
+        values = evidence(name, "field_raw_text")
+        if name == "birth_date" and values:
+            for source in source_names[name]:
+                if report["field_raw_text"].get(source):
+                    if source == "date_of_birth":
+                        return values
+                    return [date or text for text in values for _, date in [split_birth_line(text)]]
+        if name == "birth_place" and values:
+            return [split_birth_line(text)[0] for text in values]
+        return values
+
     return {
-        name: FieldResult(value=value, raw_text=evidence(name, "field_raw_text"), confidence=evidence(name, "field_confidences"), bounding_box=evidence(name, "field_bounding_boxes"), region="image")
+        name: FieldResult(value=value, raw_text=raw_text(name), confidence=evidence(name, "field_confidences"), bounding_box=evidence(name, "field_bounding_boxes"), region="image")
         for name, value in values.items()
     }
 

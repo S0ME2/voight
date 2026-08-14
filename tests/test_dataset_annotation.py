@@ -130,6 +130,28 @@ class DatasetAnnotationTests(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertIn("No matching unfinished documents.", messages)
 
+    def test_viewer_keeps_control_of_terminal_input(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            image(root / "driving_license" / "one.jpg")
+            document = discover_documents(root)[0]
+
+            class Viewer:
+                def __init__(self):
+                    self.responses = iter(finishing_inputs("driving_license"))
+                    self.closed = False
+
+                def read_input(self, _prompt):
+                    return next(self.responses)
+
+                def __call__(self):
+                    self.closed = True
+
+            viewer = Viewer()
+            self.assertEqual(run_annotation(root, [document], viewer=lambda *_: viewer), 0)
+            self.assertTrue(viewer.closed)
+            self.assertEqual(json.loads(annotation_path(root, document).read_text())["status"], "complete")
+
     def test_quit_preserves_entered_progress(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

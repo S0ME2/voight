@@ -8,6 +8,8 @@ import hashlib
 import json
 import os
 import re
+import select
+import sys
 import tempfile
 from collections import Counter
 from dataclasses import dataclass
@@ -35,7 +37,7 @@ FIELDS = {
         "place_of_birth", "place_of_issue",
     ),
     "driving_license": (
-        "surname", "given_names", "birth_place", "birth_date", "issue_date",
+        "surname", "given_names", "patronymic", "birth_place", "birth_date", "issue_date",
         "expiry_date", "issued_place", "personal_id", "license_number",
         "address", "categories", "serial_number",
     ),
@@ -51,6 +53,26 @@ class Document:
     id: str
     document_type: str
     images: dict[str, str]
+
+
+class _DocumentViewer:
+    def __init__(self, cv2: Any, title: str) -> None:
+        self._cv2 = cv2
+        self._title = title
+
+    def read_input(self, prompt: str) -> str:
+        print(prompt, end="", flush=True)
+        while True:
+            self._cv2.waitKey(20)
+            if select.select([sys.stdin], [], [], 0)[0]:
+                line = sys.stdin.readline()
+                if not line:
+                    raise EOFError
+                return line.rstrip("\n")
+
+    def __call__(self) -> None:
+        self._cv2.destroyWindow(self._title)
+        self._cv2.waitKey(1)
 
 
 def ensure_layout(root: Path) -> None:
@@ -231,7 +253,7 @@ def _help(output: Callable[[str], None]) -> None:
     output(":empty visibly empty/not present | :unreadable cannot read | :help commands")
 
 
-def show_document(root: Path, document: Document) -> Callable[[], None]:
+def show_document(root: Path, document: Document) -> _DocumentViewer:
     """Open a non-blocking OpenCV window; imported lazily for headless tests."""
     import cv2
 
@@ -254,7 +276,7 @@ def show_document(root: Path, document: Document) -> Callable[[], None]:
     cv2.namedWindow(title, cv2.WINDOW_NORMAL)
     cv2.imshow(title, display)
     cv2.waitKey(1)
-    return lambda: cv2.destroyWindow(title)
+    return _DocumentViewer(cv2, title)
 
 
 def annotate_one(
@@ -378,8 +400,9 @@ def run_annotation(
         output(f"Type: {document.document_type}")
         output("File: " + ", ".join(document.images.values()))
         close = viewer(root, document)
+        reader = getattr(close, "read_input", input_fn) if input_fn is input else input_fn
         try:
-            result = annotate_one(root, document, edit=edit, input_fn=input_fn, output=output)
+            result = annotate_one(root, document, edit=edit, input_fn=reader, output=output)
         finally:
             close()
         if result == "quit":

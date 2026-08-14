@@ -126,6 +126,9 @@ class ProfileExtractionTests(unittest.TestCase):
         )
         self.assertEqual("1. KARIMOV", extracted["surname"])
         self.assertEqual("2. ALI", extracted["given_names"])
+        self.assertIsNone(extracted["patronymic"])
+        self.assertIsNone(extracted["birth_place"])
+        self.assertIsNone(extracted["birth_date"])
         self.assertEqual(0.9, report["field_confidences"]["surname"]["score"])
         self.assertEqual([], report["validation_warnings"])
 
@@ -147,7 +150,9 @@ class ProfileExtractionTests(unittest.TestCase):
         extracted, raw = parse_fields({
             "surname": token("1. QOBULOV", 1),
             "name": token("2. HUSNIDDIN", 2),
-            "place_of_birth": token("3. TOSHLOQ 19.10.2005", 3),
+            "patronymic": token("3. O'G'LI", 3),
+            "place_of_birth": token("3. TOSHLOQ", 3),
+            "date_of_birth": token("19.10.2005", 3),
             "date_of_issue": token("4a. 17.02.2026", 4),
             "date_of_expiry": token("4b. 17.02.2036", 5),
             "place_of_issue": token("4c. TERMIZ DXM", 6),
@@ -158,8 +163,9 @@ class ProfileExtractionTests(unittest.TestCase):
             "serial_number": token("DL0008047407", 11),
         })
         self.assertEqual("2. HUSNIDDIN", extracted["given_names"])
-        self.assertEqual("3. TOSHLOQ 19.10.2005", extracted["birth_place"])
-        self.assertIsNone(extracted["birth_date"])
+        self.assertEqual("3. O'G'LI", extracted["patronymic"])
+        self.assertEqual("3. TOSHLOQ", extracted["birth_place"])
+        self.assertEqual("19.10.2005", extracted["birth_date"])
         self.assertEqual("4a. 17.02.2026", extracted["issue_date"])
         self.assertEqual("4b. 17.02.2036", extracted["expiry_date"])
         self.assertEqual("4d. 51910056970036", extracted["personal_id"])

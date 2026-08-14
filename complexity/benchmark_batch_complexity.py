@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import statistics
 import sys
 import time
 import zipfile
@@ -27,6 +28,8 @@ import requests
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLES = ROOT / "annotation_input"
 KINDS = ("passport", "id-card", "driving-license")
+SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+IdCard = tuple[str, Path, Path]
 
 
 @dataclass
@@ -52,17 +55,20 @@ class Measurement:
     recognition_packing_strategy: str | None = None
     succeeded: int | None = None
     failed: int | None = None
+    source_card_ids: tuple[str, ...] = ()
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--runtime", choices=("cpu", "gpu"), default="cpu")
+    parser.add_argument("--document-type", choices=("all", *KINDS), default="all")
     parser.add_argument("--max-batch-size", type=int, default=16)
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=600.0)
     parser.add_argument("--no-warmup", action="store_true")
     parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--id-card-dir", type=Path, help="Directory containing one front.* and back.* pair per card")
     parser.add_argument("--passport", type=Path, default=SAMPLES / "passports/passport.png")
     parser.add_argument("--id-front", type=Path, default=SAMPLES / "id_cards/uzbekistan_id_001/front.png")
     parser.add_argument("--id-back", type=Path, default=SAMPLES / "id_cards/uzbekistan_id_001/back.png")
@@ -72,19 +78,57 @@ def parse_args() -> argparse.Namespace:
         parser.error("--max-batch-size must be a positive power of two")
     if args.repeats < 1 or args.timeout <= 0:
         parser.error("--repeats and --timeout must be positive")
-    if any(not path.is_file() for path in (args.passport, args.id_front, args.id_back, args.driving_license)):
+    args.kinds = KINDS if args.document_type == "all" else (args.document_type,)
+    if "id-card" in args.kinds and args.id_card_dir:
+        try:
+            args.id_cards = load_id_cards(args.id_card_dir)
+        except ValueError as error:
+            parser.error(str(error))
+    else:
+        args.id_cards = [("cli-card", args.id_front, args.id_back)]
+    required_paths = []
+    if "passport" in args.kinds:
+        required_paths.append(args.passport)
+    if "driving-license" in args.kinds:
+        required_paths.append(args.driving_license)
+    if "id-card" in args.kinds:
+        required_paths.extend((args.id_cards[0][1], args.id_cards[0][2]))
+    if any(not path.is_file() for path in required_paths):
         parser.error("all sample paths must exist")
     args.sizes = [1 << power for power in range(args.max_batch_size.bit_length())]
     return args
 
 
-def id_archive(front: bytes, back: bytes, count: int) -> bytes:
+def load_id_cards(directory: Path) -> list[IdCard]:
+    if not directory.is_dir():
+        raise ValueError(f"ID-card directory does not exist: {directory}")
+    cards = []
+    for card_dir in sorted(path for path in directory.iterdir() if path.is_dir()):
+        sides = {}
+        for side in ("front", "back"):
+            matches = sorted(
+                path for path in card_dir.iterdir()
+                if path.is_file() and path.stem.lower() == side and path.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+            )
+            if len(matches) != 1:
+                raise ValueError(f"{card_dir} must contain exactly one {side} image")
+            sides[side] = matches[0]
+        cards.append((card_dir.name, sides["front"], sides["back"]))
+    if not cards:
+        raise ValueError(f"no ID-card directories found in {directory}")
+    return cards
+
+
+def id_archive(cards: list[IdCard], count: int) -> tuple[bytes, tuple[str, ...]]:
     output = BytesIO()
+    card_ids = []
     with zipfile.ZipFile(output, "w") as archive:
         for index in range(count):
-            archive.writestr(f"card-{index:03d}/front.png", front)
-            archive.writestr(f"card-{index:03d}/back.png", back)
-    return output.getvalue()
+            card_id, front, back = cards[index % len(cards)]
+            card_ids.append(card_id)
+            for side, path in (("front", front), ("back", back)):
+                archive.writestr(f"card-{index:03d}/{side}{path.suffix.lower()}", path.read_bytes())
+    return output.getvalue(), tuple(card_ids)
 
 
 def tensor_batches(stage: Any) -> dict[str, list[int]]:
@@ -115,8 +159,10 @@ def stage_seconds(diagnostics: dict[str, Any], total: float) -> dict[str, float]
 
 def post(args: argparse.Namespace, kind: str, count: int, repeat: int) -> Measurement:
     url = f"{args.base_url.rstrip('/')}/v1/ocr/{kind}/batch"
+    source_card_ids: tuple[str, ...] = ()
     if kind == "id-card":
-        files: Any = {"archive": ("cards.zip", id_archive(args.id_front.read_bytes(), args.id_back.read_bytes(), count), "application/zip")}
+        archive, source_card_ids = id_archive(args.id_cards, count)
+        files: Any = {"archive": ("cards.zip", archive, "application/zip")}
     else:
         image = args.passport if kind == "passport" else args.driving_license
         mime = "image/png" if image.suffix.lower() == ".png" else "image/jpeg"
@@ -155,6 +201,7 @@ def post(args: argparse.Namespace, kind: str, count: int, repeat: int) -> Measur
         diagnostics.get("text_recognition", {}).get("packing_strategy"),
         int(payload["succeeded"]),
         int(payload["failed"]),
+        source_card_ids,
     )
 
 
@@ -163,9 +210,9 @@ def proves_batching(row: Measurement) -> bool:
     return row.document_count > 1 and max(sizes + row.detection_tensor_batches + row.recognition_tensor_batches, default=0) > 1
 
 
-def summarize(rows: list[Measurement]) -> list[dict[str, Any]]:
+def summarize(rows: list[Measurement], kinds: tuple[str, ...]) -> list[dict[str, Any]]:
     summary = []
-    for kind in KINDS:
+    for kind in kinds:
         for count in sorted({row.document_count for row in rows if row.document_type == kind}):
             values = [row for row in rows if row.document_type == kind and row.document_count == count and row.status == "ok"]
             if not values:
@@ -174,8 +221,8 @@ def summarize(rows: list[Measurement]) -> list[dict[str, Any]]:
                 "document_type": kind,
                 "document_count": count,
                 "requests": len(values),
-                "total_client_seconds": sum(row.client_total_seconds for row in values),
-                "total_server_seconds": sum(row.server_total_seconds or 0.0 for row in values),
+                "total_client_seconds": statistics.median(row.client_total_seconds for row in values),
+                "total_server_seconds": statistics.median(row.server_total_seconds or 0.0 for row in values),
                 "batching_proven": any(proves_batching(row) for row in values),
                 "localization_tensor_batches": values[0].localization_tensor_batches,
                 "detection_tensor_batches": values[0].detection_tensor_batches,
@@ -185,19 +232,20 @@ def summarize(rows: list[Measurement]) -> list[dict[str, Any]]:
                 "recognition_packing_strategy": values[0].recognition_packing_strategy,
                 "succeeded": sum(row.succeeded or 0 for row in values),
                 "failed": sum(row.failed or 0 for row in values),
-                "total_stage_seconds": {stage: sum(row.stage_seconds.get(stage, 0.0) for row in values) for stage in values[0].stage_seconds},
+                "source_card_ids": values[0].source_card_ids,
+                "total_stage_seconds": {stage: statistics.median(row.stage_seconds.get(stage, 0.0) for row in values) for stage in values[0].stage_seconds},
             })
     return summary
 
 
-def plot(path: Path, summary: list[dict[str, Any]], runtime: str) -> None:
+def plot(path: Path, summary: list[dict[str, Any]], runtime: str, kinds: tuple[str, ...]) -> None:
     figure = plt.figure(figsize=(10, 6))
-    for kind in KINDS:
+    for kind in kinds:
         rows = [row for row in summary if row["document_type"] == kind]
         plt.scatter([row["document_count"] for row in rows], [row["total_server_seconds"] for row in rows], label=kind)
     plt.xlabel("Logical documents in one request")
-    plt.ylabel("Total server batch time (seconds)")
-    plt.title(f"Voight true-batch total time ({runtime})")
+    plt.ylabel("Median server batch time (seconds)")
+    plt.title(f"Voight true-batch median time ({runtime})")
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()
@@ -214,7 +262,7 @@ def plot_stages(path: Path, summary: list[dict[str, Any]], runtime: str) -> None
         values = [row["total_stage_seconds"][stage] for row in summary]
         plt.bar(labels, values, bottom=bottom, label=stage)
         bottom = [current + value for current, value in zip(bottom, values)]
-    plt.ylabel("Total server seconds")
+    plt.ylabel("Median server seconds")
     plt.title(f"Voight batch stage time ({runtime})")
     plt.xticks(rotation=30, ha="right")
     plt.legend(fontsize="small", ncol=2)
@@ -232,22 +280,33 @@ def main() -> int:
         print(f"API is not ready: {error}", file=sys.stderr)
         return 2
     if not args.no_warmup:
-        for kind in KINDS:
+        for kind in args.kinds:
             warmup = post(args, kind, 1, 0)
             if warmup.status != "ok":
                 print(f"Warm-up {kind} failed: {warmup.failure_detail}", file=sys.stderr)
                 return 2
-    rows = [post(args, kind, count, repeat) for kind in KINDS for count in args.sizes for repeat in range(1, args.repeats + 1)]
-    summary = summarize(rows)
+    rows = [post(args, kind, count, repeat) for kind in args.kinds for count in args.sizes for repeat in range(1, args.repeats + 1)]
+    summary = summarize(rows, args.kinds)
     output = args.output_dir or ROOT / "complexity" / "results" / f"{args.runtime}-{datetime.now():%Y%m%dT%H%M%S}"
     output.mkdir(parents=True, exist_ok=True)
-    metadata = {"runtime": args.runtime, "base_url": args.base_url, "max_batch_size": args.max_batch_size, "sizes": args.sizes, "repeats": args.repeats, "completed_at_utc": datetime.now(timezone.utc).isoformat()}
+    metadata = {
+        "runtime": args.runtime,
+        "base_url": args.base_url,
+        "document_type": args.document_type,
+        "max_batch_size": args.max_batch_size,
+        "sizes": args.sizes,
+        "repeats": args.repeats,
+        "summary_statistic": "median",
+        "id_card_source_dir": str(args.id_card_dir) if args.id_card_dir else None,
+        "id_card_source_cards": [card_id for card_id, _, _ in args.id_cards],
+        "completed_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
     (output / "batch_measurements.json").write_text(json.dumps({"run": metadata, "rows": [asdict(row) for row in rows], "summary": summary}, indent=2), encoding="utf-8")
     with (output / "batch_measurements.csv").open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=list(asdict(rows[0])) if rows else list(Measurement.__annotations__))
         writer.writeheader()
         writer.writerows(asdict(row) for row in rows)
-    plot(output / "batch_total_time.png", summary, args.runtime)
+    plot(output / "batch_total_time.png", summary, args.runtime, args.kinds)
     plot_stages(output / "batch_stage_time.png", summary, args.runtime)
     for row in summary:
         print(f"{row['document_type']:16} N={row['document_count']:2} total={row['total_server_seconds']:.3f}s batching={row['batching_proven']}")

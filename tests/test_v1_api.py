@@ -184,11 +184,11 @@ class V1TransportTests(unittest.TestCase):
 
     def test_driving_derived_fields_reuse_their_source_evidence(self):
         fields = _driving_field_results(
-            {"birth_place": "Toshloq", "birth_date": "19.10.2005"},
-            {"field_raw_text": {"birth_place_and_date": ["3. TOSHLOQ 19.10.2005"]}, "field_confidences": {"birth_place_and_date": None}, "field_bounding_boxes": {"birth_place_and_date": None}},
+            {"birth_place": "3. TOSHLOQ", "birth_date": "19.10.2005"},
+            {"field_raw_text": {"place_of_birth": ["3. TOSHLOQ 19.10.2005"], "date_of_birth": []}, "field_confidences": {"place_of_birth": None, "date_of_birth": None}, "field_bounding_boxes": {"place_of_birth": None, "date_of_birth": None}},
         )
-        self.assertEqual(["3. TOSHLOQ 19.10.2005"], fields["birth_place"].raw_text)
-        self.assertEqual([], fields["birth_date"].raw_text)
+        self.assertEqual(["3. TOSHLOQ"], fields["birth_place"].raw_text)
+        self.assertEqual(["19.10.2005"], fields["birth_date"].raw_text)
 
     def test_identity_response_includes_mrz(self):
         models = Models()

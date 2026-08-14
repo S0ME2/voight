@@ -1,12 +1,13 @@
+import re
 from typing import Any
 
 # Annotation labels are source-layout names; extraction keeps the stable API
 # names. Multiple source boxes may intentionally feed one extracted field. The
-# values themselves are never cleaned, parsed, or otherwise interpreted here.
+# OCR text remains raw except for separating the two values on a shared birth line.
 FIELD_ALIASES = {
     "name": "given_names",
-    "place_of_birth": "birth_place_and_date",
-    "date_of_birth": "birth_place_and_date",
+    "place_of_birth": "birth_place",
+    "date_of_birth": "birth_date",
     "date_of_issue": "issue_date",
     "date_of_expiry": "expiry_date",
     "place_of_issue": "issued_place",
@@ -15,6 +16,15 @@ FIELD_ALIASES = {
     "place_of_living": "address",
     "types": "categories",
 }
+
+_DATE = re.compile(r"(?<!\d)(?:0?[1-9]|[12]\d|3[01])[./-](?:0?[1-9]|1[0-2])[./-]\d{4}(?!\d)")
+
+
+def split_birth_line(value: str) -> tuple[str, str | None]:
+    match = _DATE.search(value)
+    if not match:
+        return value, None
+    return value[:match.start()].rstrip(), match.group(0)
 
 
 def _raw_fields(assignments: dict[str, list[dict[str, Any]]]) -> dict[str, str]:
@@ -40,11 +50,15 @@ def _canonical_assignments(assignments: dict[str, list[dict[str, Any]]]) -> dict
 
 def parse_fields(assignments: dict[str, list[dict[str, Any]]]) -> tuple[dict[str, Any], dict[str, str]]:
     raw = _raw_fields(_canonical_assignments(assignments))
+    birth_place, birth_date = split_birth_line(raw.get("birth_place", ""))
+    if raw.get("birth_date"):
+        birth_date = raw["birth_date"]
     extracted = {
         "surname": raw.get("surname") or None,
         "given_names": raw.get("given_names") or None,
-        "birth_place": raw.get("birth_place_and_date") or None,
-        "birth_date": raw.get("date_of_birth") or None,
+        "patronymic": raw.get("patronymic") or None,
+        "birth_place": birth_place or None,
+        "birth_date": birth_date or None,
         "issue_date": raw.get("issue_date") or None,
         "expiry_date": raw.get("expiry_date") or None,
         "issued_place": raw.get("issued_place") or None,
