@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import time
+from copy import deepcopy
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -36,6 +39,7 @@ class OcrSample:
     item_id: str
     image: np.ndarray
     recognition_rois: dict[str, dict[str, float]] | None = None
+    role: str | None = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +111,51 @@ def _shape_stats(images: Sequence[np.ndarray]) -> dict[str, float]:
     }
 
 
+def _call_shape_stats(
+    images: Sequence[np.ndarray],
+    source_images: Sequence[np.ndarray],
+    role: str,
+    *,
+    transformed: bool,
+) -> dict[str, Any]:
+    heights = [int(image.shape[0]) for image in source_images]
+    widths = [int(image.shape[1]) for image in source_images]
+    padded_area = sum(int(image.shape[0]) * int(image.shape[1]) for image in images)
+    unpadded_area = sum(height * width for height, width in zip(heights, widths))
+    result: dict[str, Any] = {
+        "role": role,
+        "actual_batch_size": len(images),
+        "input_widths": widths,
+        "input_heights": heights,
+        "max_width": max(widths),
+        "max_height": max(heights),
+        "sum_unpadded_pixel_area": unpadded_area,
+        "padded_tensor_pixel_area": padded_area if transformed else None,
+        "padding_efficiency": unpadded_area / padded_area if transformed and padded_area else None,
+        "shape_metric_source": "padded model input" if transformed else "source crops; backend transform unavailable",
+    }
+    if not transformed:
+        ratios = [width / max(1, height) for width, height in zip(widths, heights)]
+        padded_width = max(ratios) * len(ratios)
+        result["recognition_width_padding_efficiency"] = sum(ratios) / padded_width if padded_width else 1.0
+    return result
+
+
+def _sample_role(sample: OcrSample) -> str:
+    if sample.role in {"visible", "mrz"}:
+        return sample.role
+    prefix = sample.item_id.split(":", 1)[0]
+    return prefix if prefix in {"visible", "mrz"} else "unknown"
+
+
+def _sample_digest(image: np.ndarray) -> str:
+    return hashlib.sha256(image.tobytes()).hexdigest()
+
+
+def _text_digest(lines: Sequence[str]) -> str:
+    return hashlib.sha256(json.dumps(list(lines), ensure_ascii=False).encode()).hexdigest()
+
+
 def _finish_stage(stage: dict[str, Any]) -> None:
     calls = stage["calls"]
     stage["model_call_count"] = sum(len(call.get("tensor_batch_sizes", (call.get("tensor_batch_size"),))) for call in calls)
@@ -128,6 +177,21 @@ def _finish_stage(stage: dict[str, Any]) -> None:
     )
 
 
+def _finish_role_summaries(stage: dict[str, Any]) -> None:
+    by_role: dict[str, dict[str, float | int]] = {}
+    for call in stage["calls"]:
+        role = call["role"]
+        target = by_role.setdefault(
+            role,
+            {"model_calls": 0, "tensor_batches": 0, "model_seconds": 0.0, "wall_seconds": 0.0},
+        )
+        target["model_calls"] += 1
+        target["tensor_batches"] += len(call.get("tensor_batch_sizes", (call.get("tensor_batch_size"),)))
+        target["model_seconds"] += call["model_seconds"]
+        target["wall_seconds"] += call["wall_seconds"]
+    stage["by_role"] = by_role
+
+
 class BatchedOcr:
     """Run Paddle detection and recognition with prediction-time microbatches."""
 
@@ -139,6 +203,7 @@ class BatchedOcr:
         detection_batch_size: int,
         recognition_batch_size: int,
         recognition_packer: Any | None = None,
+        capture_inputs: bool = False,
     ):
         if detection_batch_size <= 0 or recognition_batch_size <= 0:
             raise ValueError("OCR batch sizes must be greater than zero")
@@ -147,6 +212,8 @@ class BatchedOcr:
         self.detection_batch_size = detection_batch_size
         self.recognition_batch_size = recognition_batch_size
         self.recognition_packer = recognition_packer or SequentialBatchPacker()
+        self.capture_inputs = capture_inputs
+        self.captured_inputs: dict[str, np.ndarray] = {}
 
     def _predict_chunk(
         self,
@@ -155,6 +222,8 @@ class BatchedOcr:
         indexed_images: list[tuple[int, np.ndarray]],
         calls: list[dict[str, Any]],
         stats: dict[str, int],
+        roles: Sequence[str],
+        source_images: Sequence[np.ndarray],
     ) -> tuple[dict[int, Any], dict[int, Exception]]:
         started = time.perf_counter()
         size = len(indexed_images)
@@ -178,6 +247,12 @@ class BatchedOcr:
                     "model_seconds": time.perf_counter() - started,
                     "wall_seconds": time.perf_counter() - started,
                     "error_type": type(error).__name__,
+                    **_call_shape_stats(
+                        [image for _, image in indexed_images],
+                        source_images,
+                        "mixed" if len(set(roles)) > 1 else roles[0],
+                        transformed=stage_name == "text detection",
+                    ),
                     **(_shape_stats([image for _, image in indexed_images]) if stage_name == "text recognition" else {}),
                 }
             )
@@ -188,9 +263,11 @@ class BatchedOcr:
             midpoint = size // 2
             left_results, left_failures = self._predict_chunk(
                 stage_name, model, indexed_images[:midpoint], calls, stats
+                , roles[:midpoint], source_images[:midpoint]
             )
             right_results, right_failures = self._predict_chunk(
                 stage_name, model, indexed_images[midpoint:], calls, stats
+                , roles[midpoint:], source_images[midpoint:]
             )
             return left_results | right_results, left_failures | right_failures
         elapsed = time.perf_counter() - started
@@ -202,6 +279,12 @@ class BatchedOcr:
                 "failure_count": 0,
                 "model_seconds": model_seconds,
                 "wall_seconds": elapsed,
+                **_call_shape_stats(
+                    [image for _, image in indexed_images],
+                    source_images,
+                    "mixed" if len(set(roles)) > 1 else roles[0],
+                    transformed=stage_name == "text detection",
+                ),
                 **(_shape_stats([image for _, image in indexed_images]) if stage_name == "text recognition" else {}),
             }
         )
@@ -241,7 +324,20 @@ class BatchedOcr:
             },
             "line_crop_seconds": 0.0,
             "result_unpack_seconds": 0.0,
+            "sample_records": [
+                {
+                    "sample_id": sample.item_id,
+                    "sample_role": _sample_role(sample),
+                    "sample_index": index,
+                    "crop_sha256": _sample_digest(sample.image),
+                    "width": int(sample.image.shape[1]) if sample.image.ndim >= 2 else None,
+                    "height": int(sample.image.shape[0]) if sample.image.ndim >= 1 else None,
+                }
+                for index, sample in enumerate(samples)
+            ],
         }
+        if self.capture_inputs:
+            self.captured_inputs = {sample.item_id: sample.image.copy() for sample in samples}
 
         detection_results: dict[int, Any] = {}
         errors = dict(invalid)
@@ -252,12 +348,15 @@ class BatchedOcr:
                 _pad_detection_batch(chunk),
                 diagnostics["text_detection"]["calls"],
                 diagnostics["text_detection"],
+                [_sample_role(samples[index]) for index, _ in chunk],
+                [samples[index].image for index, _ in chunk],
             )
             detection_results.update(results)
             errors.update(failures)
 
         line_crop_started = time.perf_counter()
         lines: list[tuple[int, np.ndarray, np.ndarray]] = []
+        line_crop_seconds_by_role = {"visible": 0.0, "mrz": 0.0}
         for sample_index, result in detection_results.items():
             if result.error:
                 errors[sample_index] = ValueError(result.error)
@@ -270,6 +369,7 @@ class BatchedOcr:
             diagnostics["line_filter"]["detected_line_count"] += len(polygons)
             for polygon in polygons:
                 try:
+                    crop_started = time.perf_counter()
                     polygon = np.asarray(polygon, dtype=np.float32)
                     height, width = sample.image.shape[:2]
                     polygon[:, 0] = np.clip(polygon[:, 0], 0, width - 1)
@@ -282,6 +382,9 @@ class BatchedOcr:
                         diagnostics["line_filter"]["filtered_before_recognition_count"] += 1
                         continue
                     crop, ordered = _line_crop(sample.image, polygon)
+                    role = _sample_role(sample)
+                    line_crop_seconds_by_role.setdefault(role, 0.0)
+                    line_crop_seconds_by_role[role] += time.perf_counter() - crop_started
                 except (cv2.error, TypeError, ValueError) as error:
                     errors[sample_index] = error
                     lines = [line for line in lines if line[0] != sample_index]
@@ -295,6 +398,7 @@ class BatchedOcr:
                 counts["recognition_candidate_count"] += 1
                 diagnostics["line_filter"]["recognition_candidate_count"] += 1
         diagnostics["line_crop_seconds"] = time.perf_counter() - line_crop_started
+        diagnostics["line_crop_seconds_by_role"] = line_crop_seconds_by_role
 
         recognition_results: dict[int, Any] = {}
         recognition_errors: dict[int, Exception] = {}
@@ -306,7 +410,9 @@ class BatchedOcr:
         for chunk in recognition_chunks:
             results, failures = self._predict_chunk(
                 "text recognition", self.recognizer, chunk,
-                diagnostics["text_recognition"]["calls"], diagnostics["text_recognition"]
+                diagnostics["text_recognition"]["calls"], diagnostics["text_recognition"],
+                [_sample_role(samples[lines[line_index][0]]) for line_index, _ in chunk],
+                [lines[line_index][1] for line_index, _ in chunk],
             )
             recognition_results.update(results)
             recognition_errors.update(failures)
@@ -354,6 +460,26 @@ class BatchedOcr:
 
         for stage in (diagnostics["text_detection"], diagnostics["text_recognition"]):
             _finish_stage(stage)
+            _finish_role_summaries(stage)
+        diagnostics["sample_counts"] = {
+            role: sum(_sample_role(sample) == role for sample in samples)
+            for role in ("visible", "mrz")
+        }
+        diagnostics["line_counts_by_role"] = {
+            role: {
+                "detected": sum(
+                    value["detected_line_count"]
+                    for sample_id, value in diagnostics["line_filter"]["samples"].items()
+                    if sample_id.startswith(role + ":")
+                ),
+                "recognized": sum(
+                    value["recognition_candidate_count"]
+                    for sample_id, value in diagnostics["line_filter"]["samples"].items()
+                    if sample_id.startswith(role + ":")
+                ),
+            }
+            for role in ("visible", "mrz")
+        }
         return OcrBatchResult(
             tokens={samples[index].item_id: value for index, value in tokens_by_index.items()},
             errors={samples[index].item_id: error for index, error in errors.items()},
@@ -402,11 +528,14 @@ class ProfileBatchRunner:
         max_items: int,
         mrz_recognizer: Any | None = None,
         mrz_recognition_batch_size: int | None = None,
+        ocr_grouping: str = "combined",
     ):
         if localization_batch_size <= 0 or max_items <= 0 or (
             mrz_recognition_batch_size is not None and mrz_recognition_batch_size <= 0
         ):
             raise ValueError("batch limits must be greater than zero")
+        if ocr_grouping not in {"combined", "split"}:
+            raise ValueError("ocr_grouping must be combined or split")
         self.ocr = ocr
         self.localizers = localizers
         self.mrz_settings = mrz_settings
@@ -414,6 +543,38 @@ class ProfileBatchRunner:
         self.mrz_recognizer = mrz_recognizer
         self.mrz_recognition_batch_size = mrz_recognition_batch_size or ocr.recognition_batch_size
         self.max_items = max_items
+        self.ocr_grouping = ocr_grouping
+
+    @staticmethod
+    def _merge_ocr_results(results: Sequence[OcrBatchResult]) -> OcrBatchResult:
+        if len(results) == 1:
+            return results[0]
+        merged = deepcopy(results[0].diagnostics)
+        for result in results[1:]:
+            for stage_name in ("text_detection", "text_recognition"):
+                merged[stage_name]["calls"].extend(result.diagnostics[stage_name]["calls"])
+            merged["line_filter"]["samples"].update(result.diagnostics["line_filter"]["samples"])
+            merged["line_filter"]["detected_line_count"] += result.diagnostics["line_filter"]["detected_line_count"]
+            merged["line_filter"]["recognition_candidate_count"] += result.diagnostics["line_filter"]["recognition_candidate_count"]
+            merged["line_filter"]["filtered_before_recognition_count"] += result.diagnostics["line_filter"]["filtered_before_recognition_count"]
+            merged["sample_records"].extend(result.diagnostics["sample_records"])
+            for role in ("visible", "mrz"):
+                merged["sample_counts"][role] += result.diagnostics["sample_counts"][role]
+                for key in ("detected", "recognized"):
+                    merged["line_counts_by_role"][role][key] += result.diagnostics["line_counts_by_role"][role][key]
+                merged["line_crop_seconds_by_role"][role] += result.diagnostics["line_crop_seconds_by_role"][role]
+            merged["line_crop_seconds"] += result.diagnostics["line_crop_seconds"]
+            merged["result_unpack_seconds"] += result.diagnostics["result_unpack_seconds"]
+        for stage_name in ("text_detection", "text_recognition"):
+            _finish_stage(merged[stage_name])
+            _finish_role_summaries(merged[stage_name])
+        merged["line_filter"]["samples"] = dict(merged["line_filter"]["samples"])
+        merged["ocr_grouping"] = "split"
+        return OcrBatchResult(
+            tokens={key: value for result in results for key, value in result.tokens.items()},
+            errors={key: value for result in results for key, value in result.errors.items()},
+            diagnostics=merged,
+        )
 
     def _recognize_mrz_chunk(
         self,
@@ -622,6 +783,7 @@ class ProfileBatchRunner:
                 f"visible:{item.item_id}",
                 prepared[item.item_id].data_crop,
                 prepared[item.item_id].profile.field_rois,
+                "visible",
             )
             for item in items
             if item.item_id in prepared
@@ -643,14 +805,24 @@ class ProfileBatchRunner:
                 item.artifacts.save_image("mrz_crop.jpg", crop)
                 item.artifacts.save_image("mrz_preprocessed.png", processed)
                 if self.mrz_recognizer is None:
-                    ocr_samples.append(OcrSample(f"mrz:{item.item_id}", processed))
+                    ocr_samples.append(OcrSample(f"mrz:{item.item_id}", processed, role="mrz"))
                 else:
                     mrz_crops.append((item.item_id, crop))
             except (cv2.error, TypeError, ValueError) as error:
                 errors[item.item_id] = error
         mrz_crop_seconds = time.perf_counter() - mrz_crop_started
 
-        ocr_result = self.ocr.run(ocr_samples)
+        if self.ocr_grouping == "split":
+            grouped_samples = {
+                role: [sample for sample in ocr_samples if sample.role == role]
+                for role in ("visible", "mrz")
+            }
+            ocr_result = self._merge_ocr_results(
+                [self.ocr.run(samples) for samples in grouped_samples.values() if samples]
+            )
+        else:
+            ocr_result = self.ocr.run(ocr_samples)
+            ocr_result.diagnostics["ocr_grouping"] = "combined"
         mrz_diagnostics = {
             "backend": "generic-paddle" if self.mrz_recognizer is None else "mrzscanner",
             "configured_batch_size": self.mrz_recognition_batch_size,
@@ -715,6 +887,17 @@ class ProfileBatchRunner:
                     mrz_detected=item.item_id in mrz_polygons,
                 )
         result_assembly_seconds = time.perf_counter() - result_assembly_started
+        mrz_output_signatures = {}
+        for item in items:
+            tokens = ocr_result.tokens.get(f"mrz:{item.item_id}", [])
+            reconstructed = reconstruct(tokens)
+            selected = select(reconstructed, item.mrz_profile.line_counts) if item.mrz_profile else []
+            mrz_output_signatures[item.item_id] = {
+                "detected_line_count": len(reconstructed),
+                "detected_lines_sha256": _text_digest([line.text for line in reconstructed]),
+                "reconstructed_line_count": len(selected),
+                "reconstructed_lines_sha256": _text_digest([line.text for line in selected]),
+            }
 
         diagnostics = {
             "total_wall_seconds": time.perf_counter() - started_total,
@@ -729,5 +912,6 @@ class ProfileBatchRunner:
             },
             **ocr_result.diagnostics,
             "mrz_recognition": mrz_diagnostics,
+            "mrz_output_signatures": mrz_output_signatures,
         }
         return [outcomes_by_id[item.item_id] for item in items], diagnostics
