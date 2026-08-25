@@ -234,6 +234,22 @@ class BatchedOcrTests(unittest.TestCase):
         self.assertEqual(["value-10"], [token["text"] for token in result.tokens["visible"]])
         self.assertEqual(2, len(result.tokens["mrz"]))
 
+    def test_mrz_batch_size_is_independent_for_generic_recognizer(self):
+        class Lines:
+            def detect_batch(self, images):
+                polygons = np.asarray(
+                    [[[2, 2], [20, 2], [20, 6], [2, 6]]], dtype=np.float32
+                )
+                return [DetectedTextRegions(tuple(DetectedTextRegion(polygon) for polygon in polygons)) for _ in images]
+
+        recognizer = RecognitionStub()
+        result = BatchedOcr(
+            Lines(), recognizer, detection_batch_size=2, recognition_batch_size=4, mrz_recognition_batch_size=1
+        ).run([OcrSample("visible", image(10), role="visible"), OcrSample("mrz", image(20), role="mrz")])
+
+        self.assertEqual([1, 1], recognizer.batch_sizes)
+        self.assertEqual([1, 1], result.diagnostics["text_recognition"]["tensor_batch_sizes"])
+
     def test_retained_lines_across_field_rois_keep_reading_order(self):
         class Lines:
             def detect_batch(self, images):

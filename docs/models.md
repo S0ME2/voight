@@ -7,7 +7,7 @@
 | Document localizer | DocAligner `fastvit_sa24` | default |
 | MRZ localizer | MRZScanner detection `20250222` | default |
 | Text detector | Paddle `PP-OCRv6_medium_det` | default |
-| Text recognizer | Paddle `PP-OCRv6_medium_rec` | default |
+| Text recognizer | Paddle `latin_PP-OCRv5_mobile_rec` | default |
 | MRZ recognizer | generic Paddle recognizer | default |
 | Specialized MRZ recognizer | MRZScanner `20250221` | experimental |
 

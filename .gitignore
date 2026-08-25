@@ -1,27 +1,42 @@
-.env
-.venv/
+# Bytecode and caches
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# Virtual environments
+.venv/
 *.egg-info/
 build/
 dist/
+
+# Environment and local config
+.env
+.codex/
+.claude/
+.personal/
+.github/
+AGENTS.md
+
+# Generated artifacts (local only)
 logs/
 logs-from-container/
 outputs/
-complexity/results/
-/dataset/
-/.paddlex/
-/models/
+dataset/
+experiments/
+models/
+.paddlex/
+
+# Benchmarks results (gitignored)
+benchmarks/results/
+
+# IDE / OS
+.DS_Store
 *.bak
-DELETE_ME/
 code.zip
+
+# Coverage
 .coverage
 .coverage.*
 htmlcov/
-.DS_Store
-.codex/
-AGENTS.md
-./Beeline/

@@ -18,6 +18,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "coverage==7.6.10",
     "matplotlib==3.11.1",
     "requests==2.34.2",
 ]

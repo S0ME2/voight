@@ -1,11 +1,21 @@
-from pathlib import Path
-import re
 import subprocess
 import unittest
+from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCAL_PATH = re.compile(r"/Users/|/home/(?!voight(?:/|\b))|(?:^|[\"'])~/(?:Desktop/)?|[A-Za-z]:\\\\")
+
+
+def tracked_files() -> list[str]:
+    return subprocess.run(
+        ["git", "ls-files"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
 
 
 class RepositoryLayoutTests(unittest.TestCase):
@@ -21,6 +31,8 @@ class RepositoryLayoutTests(unittest.TestCase):
             "docs/development.md",
             "docs/benchmarking.md",
             "docs/dataset.md",
+            "docs/gates.md",
+            "docs/reorganization-2026-08.md",
         }
         self.assertFalse([path for path in required if not (ROOT / path).is_file()])
         removed = (
@@ -28,19 +40,58 @@ class RepositoryLayoutTests(unittest.TestCase):
             "app/api/batch.py",
             "app/workflows.py",
             "scripts/pipelines/driving_license_pipeline.py",
+            "complexity/benchmark_batch_complexity.py",
+            "GATES.md",
+            "scripts/benchmarking/pipeline_breakdown.py",
+            "scripts/experiments/mrz/annotate_passport_mrz.py",
         )
         self.assertFalse([path for path in removed if (ROOT / path).exists()])
 
+    def test_benchmarks_are_separated_into_maintained_and_historical(self):
+        maintained = ROOT / "benchmarks" / "maintained"
+        historical = ROOT / "benchmarks" / "historical"
+        self.assertTrue(maintained.is_dir())
+        self.assertTrue(historical.is_dir())
+        # Core maintained benchmarks stay runnable through Makefile targets.
+        for name in (
+            "benchmark_batch_complexity.py",
+            "pipeline_breakdown.py",
+            "text_recognition_batch_benchmark.py",
+        ):
+            self.assertTrue((maintained / name).is_file(), name)
+        # Historical experiment drivers are preserved under their own area.
+        for name in (
+            "cpu_thread_benchmark.py",
+            "recognizer_ab_benchmark.py",
+            "mrz_preprocessing_reconciliation.py",
+        ):
+            self.assertTrue((historical / name).is_file(), name)
+
+    def test_tracked_files_avoid_legacy_tool_locations(self):
+        legacy_prefixes = ("scripts/benchmarking/", "scripts/experiments/", "complexity/")
+        offenders = [path for path in tracked_files() if path.startswith(legacy_prefixes)]
+        self.assertEqual([], offenders)
+
+    def test_exploration_prototypes_are_archived_not_deleted(self):
+        archived = ROOT / "archive" / "scripts-experiments"
+        self.assertTrue(archived.is_dir())
+        for name in (
+            "alignment/test_docaligner.py",
+            "mrz/test_fastmrz.py",
+            "ocr/best_run.py",
+            "roi/test_rois.py",
+        ):
+            self.assertTrue((archived / name).is_file(), name)
+
     def test_tracked_project_text_has_no_developer_absolute_paths(self):
-        tracked = subprocess.run(
+        offenders = []
+        for relative in subprocess.run(
             ["git", "ls-files", "-co", "--exclude-standard"],
             cwd=ROOT,
             check=True,
             capture_output=True,
             text=True,
-        ).stdout.splitlines()
-        offenders = []
-        for relative in tracked:
+        ).stdout.splitlines():
             path = ROOT / relative
             if relative.startswith(".codex/") or relative == "tests/test_repository_layout.py" or not path.is_file():
                 continue

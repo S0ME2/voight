@@ -19,7 +19,7 @@ class MRZLine:
     center_y: float
 
 
-def preprocess(image: np.ndarray, max_side: int, contrast: float) -> np.ndarray:
+def preprocess(image: np.ndarray, max_side: int, contrast: float = 1.0) -> np.ndarray:
     height, width = image.shape[:2]
     if max(height, width) > max_side:
         scale = max_side / max(height, width)
@@ -27,6 +27,14 @@ def preprocess(image: np.ndarray, max_side: int, contrast: float) -> np.ndarray:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     mean = float(gray.mean())
     adjusted = np.clip((gray.astype(np.float32) - mean) * contrast + mean, 0, 255).astype(np.uint8)
+    return cv2.cvtColor(adjusted, cv2.COLOR_GRAY2BGR)
+
+
+def apply_contrast(image: np.ndarray, factor: float) -> np.ndarray:
+    """Apply MRZ contrast to one unscaled line crop."""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image.copy()
+    mean = float(gray.mean())
+    adjusted = np.clip((gray.astype(np.float32) - mean) * factor + mean, 0, 255).astype(np.uint8)
     return cv2.cvtColor(adjusted, cv2.COLOR_GRAY2BGR)
 
 

@@ -1,0 +1,1355 @@
+{
+  "driving_license": {
+    "document_type": "driving_license",
+    "fields": {
+      "address": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "TASHKENT"
+        ],
+        "region": "image",
+        "value": "TASHKENT"
+      },
+      "birth_date": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "01.01.2000"
+        ],
+        "region": "image",
+        "value": "01.01.2000"
+      },
+      "birth_place": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "TASHKENT"
+        ],
+        "region": "image",
+        "value": "TASHKENT"
+      },
+      "categories": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "B"
+        ],
+        "region": "image",
+        "value": "B"
+      },
+      "expiry_date": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "01.01.2030"
+        ],
+        "region": "image",
+        "value": "01.01.2030"
+      },
+      "given_names": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "JOHN"
+        ],
+        "region": "image",
+        "value": "JOHN"
+      },
+      "issue_date": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "01.01.2020"
+        ],
+        "region": "image",
+        "value": "01.01.2020"
+      },
+      "issued_place": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "IIV"
+        ],
+        "region": "image",
+        "value": "IIV"
+      },
+      "license_number": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "BB7654321"
+        ],
+        "region": "image",
+        "value": "BB7654321"
+      },
+      "patronymic": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "DOE"
+        ],
+        "region": "image",
+        "value": "DOE"
+      },
+      "personal_id": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "AA1234567"
+        ],
+        "region": "image",
+        "value": "AA1234567"
+      },
+      "serial_number": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "UZ"
+        ],
+        "region": "image",
+        "value": "UZ"
+      },
+      "surname": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "DRIVER"
+        ],
+        "region": "image",
+        "value": "DRIVER"
+      }
+    },
+    "layout": "driving_license",
+    "mrz": null,
+    "success": true,
+    "validations": [],
+    "warnings": []
+  },
+  "id_card": {
+    "document_type": "id_card",
+    "fields": {
+      "card_number": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "AD6632763"
+        ],
+        "region": "front",
+        "value": "AD6632763"
+      },
+      "citizenship": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "O'ZBEKISTON"
+        ],
+        "region": "front",
+        "value": "O'ZBEKISTON"
+      },
+      "date_of_birth": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "11.03.1974"
+        ],
+        "region": "front",
+        "value": "11.03.1974"
+      },
+      "date_of_expiry": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "27.03.2034"
+        ],
+        "region": "front",
+        "value": "27.03.2034"
+      },
+      "date_of_issue": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "28.03.2024"
+        ],
+        "region": "front",
+        "value": "28.03.2024"
+      },
+      "name": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "IRODA"
+        ],
+        "region": "front",
+        "value": "IRODA"
+      },
+      "patronymic": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "IBROXIMOVNA"
+        ],
+        "region": "front",
+        "value": "IBROXIMOVNA"
+      },
+      "pinfl": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "41103741390036"
+        ],
+        "region": "back",
+        "value": "41103741390036"
+      },
+      "place_of_birth": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "SHAXRIXON"
+        ],
+        "region": "back",
+        "value": "SHAXRIXON"
+      },
+      "place_of_issue": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "IIV3234"
+        ],
+        "region": "back",
+        "value": "IIV3234"
+      },
+      "sex": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "AYOL"
+        ],
+        "region": "front",
+        "value": "AYOL"
+      },
+      "surname": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "EGAMOVA"
+        ],
+        "region": "front",
+        "value": "EGAMOVA"
+      }
+    },
+    "layout": "uzbekistan_id_card",
+    "mrz": {
+      "fields": {
+        "date_of_birth": "740311",
+        "date_of_expiry": "340327",
+        "document_code": "I",
+        "document_number": "AD6632763",
+        "given_names": "IRODA",
+        "issuing_state": "UZB",
+        "nationality": "UZB",
+        "optional_data": "41103741390036",
+        "pinfl": "41103741390036",
+        "sex": "F",
+        "surname": "EGAMOVA"
+      },
+      "raw_lines": [
+        "I<UZBAD6632763841103741390036<",
+        "7403116F3403277UZB<<<<<<<<<<<8",
+        "EGAMOVA<<IRODA<<<<<<<<<<<<<<<<"
+      ],
+      "validations": [
+        {
+          "code": "mrz_document_number_check_digit",
+          "detail": "expected 8, calculated 8",
+          "fields": [
+            "document_number"
+          ],
+          "status": "passed"
+        },
+        {
+          "code": "mrz_birth_date_check_digit",
+          "detail": "expected 6, calculated 6",
+          "fields": [
+            "date_of_birth"
+          ],
+          "status": "passed"
+        },
+        {
+          "code": "mrz_expiry_date_check_digit",
+          "detail": "expected 7, calculated 7",
+          "fields": [
+            "date_of_expiry"
+          ],
+          "status": "passed"
+        },
+        {
+          "code": "mrz_composite_check_digit",
+          "detail": "expected 8, calculated 8",
+          "fields": [
+            "document_number",
+            "date_of_birth",
+            "date_of_expiry",
+            "optional_data"
+          ],
+          "status": "passed"
+        }
+      ]
+    },
+    "success": true,
+    "validations": [
+      {
+        "code": "required_visible_fields",
+        "detail": null,
+        "fields": [],
+        "status": "passed"
+      },
+      {
+        "code": "visible_mrz_surname",
+        "detail": null,
+        "fields": [
+          "surname",
+          "mrz.surname"
+        ],
+        "status": "passed"
+      },
+      {
+        "code": "visible_mrz_name",
+        "detail": null,
+        "fields": [
+          "name",
+          "mrz.given_names"
+        ],
+        "status": "passed"
+      },
+      {
+        "code": "visible_mrz_card_number",
+        "detail": null,
+        "fields": [
+          "card_number",
+          "mrz.document_number"
+        ],
+        "status": "passed"
+      },
+      {
+        "code": "visible_mrz_pinfl",
+        "detail": null,
+        "fields": [
+          "pinfl",
+          "mrz.pinfl"
+        ],
+        "status": "passed"
+      },
+      {
+        "code": "visible_mrz_date_of_birth",
+        "detail": null,
+        "fields": [
+          "date_of_birth",
+          "mrz.date_of_birth"
+        ],
+        "status": "passed"
+      },
+      {
+        "code": "visible_mrz_sex",
+        "detail": null,
+        "fields": [
+          "sex",
+          "mrz.sex"
+        ],
+        "status": "passed"
+      },
+      {
+        "code": "visible_mrz_citizenship",
+        "detail": null,
+        "fields": [
+          "citizenship",
+          "mrz.nationality"
+        ],
+        "status": "passed"
+      },
+      {
+        "code": "visible_mrz_date_of_expiry",
+        "detail": null,
+        "fields": [
+          "date_of_expiry",
+          "mrz.date_of_expiry"
+        ],
+        "status": "passed"
+      }
+    ],
+    "warnings": []
+  },
+  "passport": {
+    "document_type": "passport",
+    "fields": {
+      "authority": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "IIV"
+        ],
+        "region": "data_page",
+        "value": "IIV"
+      },
+      "country_code": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "UZB"
+        ],
+        "region": "data_page",
+        "value": "UZB"
+      },
+      "date_of_birth": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "01.01.2000"
+        ],
+        "region": "data_page",
+        "value": "01.01.2000"
+      },
+      "date_of_expiry": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "01.01.2030"
+        ],
+        "region": "data_page",
+        "value": "01.01.2030"
+      },
+      "date_of_issue": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "01.01.2020"
+        ],
+        "region": "data_page",
+        "value": "01.01.2020"
+      },
+      "name": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "JOHN"
+        ],
+        "region": "data_page",
+        "value": "JOHN"
+      },
+      "nationality": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "UZBEKISTAN"
+        ],
+        "region": "data_page",
+        "value": "UZBEKISTAN"
+      },
+      "passport_number": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "000000000"
+        ],
+        "region": "data_page",
+        "value": "000000000"
+      },
+      "patronymic": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "DOE"
+        ],
+        "region": "data_page",
+        "value": "DOE"
+      },
+      "place_of_birth": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "TASHKENT"
+        ],
+        "region": "data_page",
+        "value": "TASHKENT"
+      },
+      "sex": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "M"
+        ],
+        "region": "data_page",
+        "value": "M"
+      },
+      "surname": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "CITIZEN"
+        ],
+        "region": "data_page",
+        "value": "CITIZEN"
+      },
+      "type": {
+        "bounding_box": {
+          "x1": 0.1,
+          "x2": 0.2,
+          "y1": 0.1,
+          "y2": 0.2
+        },
+        "confidence": {
+          "calibrated_probability": false,
+          "score": 0.9,
+          "source": "ocr_token_mean"
+        },
+        "raw_text": [
+          "P"
+        ],
+        "region": "data_page",
+        "value": "P"
+      }
+    },
+    "layout": "uzbekistan_passport",
+    "mrz": {
+      "fields": {
+        "date_of_birth": "000000",
+        "date_of_expiry": "000000",
+        "document_code": "P",
+        "document_number": "000000000",
+        "given_names": "JOHN",
+        "issuing_state": "UZB",
+        "nationality": "UZB",
+        "optional_data": "00000000000000",
+        "sex": "M",
+        "surname": "CITIZEN"
+      },
+      "raw_lines": [
+        "P<UZBCITIZEN<<JOHN<<<<<<<<<<<<<<<<<<<<<<<<<<",
+        "0000000000UZB0000000M00000000000000000000000"
+      ],
+      "validations": [
+        {
+          "code": "mrz_document_number_check_digit",
+          "detail": "expected 0, calculated 0",
+          "fields": [
+            "document_number"
+          ],
+          "status": "passed"
+        },
+        {
+          "code": "mrz_birth_date_check_digit",
+          "detail": "expected 0, calculated 0",
+          "fields": [
+            "date_of_birth"
+          ],
+          "status": "passed"
+        },
+        {
+          "code": "mrz_expiry_date_check_digit",
+          "detail": "expected 0, calculated 0",
+          "fields": [
+            "date_of_expiry"
+          ],
+          "status": "passed"
+        },
+        {
+          "code": "mrz_optional_data_check_digit",
+          "detail": "expected 0, calculated 0",
+          "fields": [
+            "optional_data"
+          ],
+          "status": "passed"
+        },
+        {
+          "code": "mrz_composite_check_digit",
+          "detail": "expected 0, calculated 0",
+          "fields": [
+            "document_number",
+            "date_of_birth",
+            "date_of_expiry",
+            "optional_data"
+          ],
+          "status": "passed"
+        }
+      ]
+    },
+    "success": true,
+    "validations": [
+      {
+        "code": "required_visible_fields",
+        "detail": null,
+        "fields": [],
+        "status": "passed"
+      },
+      {
+        "code": "visible_mrz_surname",
+        "detail": null,
+        "fields": [
+          "surname",
+          "mrz.surname"
+        ],
+        "status": "passed"
+      },
+      {
+        "code": "visible_mrz_name",
+        "detail": null,
+        "fields": [
+          "name",
+          "mrz.given_names"
+        ],
+        "status": "passed"
+      },
+      {
+        "code": "visible_mrz_passport_number",
+        "detail": null,
+        "fields": [
+          "passport_number",
+          "mrz.document_number"
+        ],
+        "status": "passed"
+      },
+      {
+        "code": "visible_mrz_date_of_birth",
+        "detail": "visible text '01.01.2000' conflicts with MRZ '000000'",
+        "fields": [
+          "date_of_birth",
+          "mrz.date_of_birth"
+        ],
+        "status": "failed"
+      },
+      {
+        "code": "visible_mrz_sex",
+        "detail": null,
+        "fields": [
+          "sex",
+          "mrz.sex"
+        ],
+        "status": "passed"
+      },
+      {
+        "code": "visible_mrz_date_of_expiry",
+        "detail": "visible text '01.01.2030' conflicts with MRZ '000000'",
+        "fields": [
+          "date_of_expiry",
+          "mrz.date_of_expiry"
+        ],
+        "status": "failed"
+      }
+    ],
+    "warnings": []
+  },
+  "per_item_errors": {
+    "failed": 1,
+    "items": [
+      {
+        "document_type": "passport",
+        "fields": {
+          "authority": {
+            "bounding_box": {
+              "x1": 0.1,
+              "x2": 0.2,
+              "y1": 0.1,
+              "y2": 0.2
+            },
+            "confidence": {
+              "calibrated_probability": false,
+              "score": 0.9,
+              "source": "ocr_token_mean"
+            },
+            "raw_text": [
+              "IIV"
+            ],
+            "region": "data_page",
+            "value": "IIV"
+          },
+          "country_code": {
+            "bounding_box": {
+              "x1": 0.1,
+              "x2": 0.2,
+              "y1": 0.1,
+              "y2": 0.2
+            },
+            "confidence": {
+              "calibrated_probability": false,
+              "score": 0.9,
+              "source": "ocr_token_mean"
+            },
+            "raw_text": [
+              "UZB"
+            ],
+            "region": "data_page",
+            "value": "UZB"
+          },
+          "date_of_birth": {
+            "bounding_box": {
+              "x1": 0.1,
+              "x2": 0.2,
+              "y1": 0.1,
+              "y2": 0.2
+            },
+            "confidence": {
+              "calibrated_probability": false,
+              "score": 0.9,
+              "source": "ocr_token_mean"
+            },
+            "raw_text": [
+              "01.01.2000"
+            ],
+            "region": "data_page",
+            "value": "01.01.2000"
+          },
+          "date_of_expiry": {
+            "bounding_box": {
+              "x1": 0.1,
+              "x2": 0.2,
+              "y1": 0.1,
+              "y2": 0.2
+            },
+            "confidence": {
+              "calibrated_probability": false,
+              "score": 0.9,
+              "source": "ocr_token_mean"
+            },
+            "raw_text": [
+              "01.01.2030"
+            ],
+            "region": "data_page",
+            "value": "01.01.2030"
+          },
+          "date_of_issue": {
+            "bounding_box": {
+              "x1": 0.1,
+              "x2": 0.2,
+              "y1": 0.1,
+              "y2": 0.2
+            },
+            "confidence": {
+              "calibrated_probability": false,
+              "score": 0.9,
+              "source": "ocr_token_mean"
+            },
+            "raw_text": [
+              "01.01.2020"
+            ],
+            "region": "data_page",
+            "value": "01.01.2020"
+          },
+          "name": {
+            "bounding_box": {
+              "x1": 0.1,
+              "x2": 0.2,
+              "y1": 0.1,
+              "y2": 0.2
+            },
+            "confidence": {
+              "calibrated_probability": false,
+              "score": 0.9,
+              "source": "ocr_token_mean"
+            },
+            "raw_text": [
+              "JOHN"
+            ],
+            "region": "data_page",
+            "value": "JOHN"
+          },
+          "nationality": {
+            "bounding_box": {
+              "x1": 0.1,
+              "x2": 0.2,
+              "y1": 0.1,
+              "y2": 0.2
+            },
+            "confidence": {
+              "calibrated_probability": false,
+              "score": 0.9,
+              "source": "ocr_token_mean"
+            },
+            "raw_text": [
+              "UZBEKISTAN"
+            ],
+            "region": "data_page",
+            "value": "UZBEKISTAN"
+          },
+          "passport_number": {
+            "bounding_box": {
+              "x1": 0.1,
+              "x2": 0.2,
+              "y1": 0.1,
+              "y2": 0.2
+            },
+            "confidence": {
+              "calibrated_probability": false,
+              "score": 0.9,
+              "source": "ocr_token_mean"
+            },
+            "raw_text": [
+              "000000000"
+            ],
+            "region": "data_page",
+            "value": "000000000"
+          },
+          "patronymic": {
+            "bounding_box": {
+              "x1": 0.1,
+              "x2": 0.2,
+              "y1": 0.1,
+              "y2": 0.2
+            },
+            "confidence": {
+              "calibrated_probability": false,
+              "score": 0.9,
+              "source": "ocr_token_mean"
+            },
+            "raw_text": [
+              "DOE"
+            ],
+            "region": "data_page",
+            "value": "DOE"
+          },
+          "place_of_birth": {
+            "bounding_box": {
+              "x1": 0.1,
+              "x2": 0.2,
+              "y1": 0.1,
+              "y2": 0.2
+            },
+            "confidence": {
+              "calibrated_probability": false,
+              "score": 0.9,
+              "source": "ocr_token_mean"
+            },
+            "raw_text": [
+              "TASHKENT"
+            ],
+            "region": "data_page",
+            "value": "TASHKENT"
+          },
+          "sex": {
+            "bounding_box": {
+              "x1": 0.1,
+              "x2": 0.2,
+              "y1": 0.1,
+              "y2": 0.2
+            },
+            "confidence": {
+              "calibrated_probability": false,
+              "score": 0.9,
+              "source": "ocr_token_mean"
+            },
+            "raw_text": [
+              "M"
+            ],
+            "region": "data_page",
+            "value": "M"
+          },
+          "surname": {
+            "bounding_box": {
+              "x1": 0.1,
+              "x2": 0.2,
+              "y1": 0.1,
+              "y2": 0.2
+            },
+            "confidence": {
+              "calibrated_probability": false,
+              "score": 0.9,
+              "source": "ocr_token_mean"
+            },
+            "raw_text": [
+              "CITIZEN"
+            ],
+            "region": "data_page",
+            "value": "CITIZEN"
+          },
+          "type": {
+            "bounding_box": {
+              "x1": 0.1,
+              "x2": 0.2,
+              "y1": 0.1,
+              "y2": 0.2
+            },
+            "confidence": {
+              "calibrated_probability": false,
+              "score": 0.9,
+              "source": "ocr_token_mean"
+            },
+            "raw_text": [
+              "P"
+            ],
+            "region": "data_page",
+            "value": "P"
+          }
+        },
+        "layout": "uzbekistan_passport",
+        "mrz": {
+          "fields": {
+            "date_of_birth": "000000",
+            "date_of_expiry": "000000",
+            "document_code": "P",
+            "document_number": "000000000",
+            "given_names": "JOHN",
+            "issuing_state": "UZB",
+            "nationality": "UZB",
+            "optional_data": "00000000000000",
+            "sex": "M",
+            "surname": "CITIZEN"
+          },
+          "raw_lines": [
+            "P<UZBCITIZEN<<JOHN<<<<<<<<<<<<<<<<<<<<<<<<<<",
+            "0000000000UZB0000000M00000000000000000000000"
+          ],
+          "validations": [
+            {
+              "code": "mrz_document_number_check_digit",
+              "detail": "expected 0, calculated 0",
+              "fields": [
+                "document_number"
+              ],
+              "status": "passed"
+            },
+            {
+              "code": "mrz_birth_date_check_digit",
+              "detail": "expected 0, calculated 0",
+              "fields": [
+                "date_of_birth"
+              ],
+              "status": "passed"
+            },
+            {
+              "code": "mrz_expiry_date_check_digit",
+              "detail": "expected 0, calculated 0",
+              "fields": [
+                "date_of_expiry"
+              ],
+              "status": "passed"
+            },
+            {
+              "code": "mrz_optional_data_check_digit",
+              "detail": "expected 0, calculated 0",
+              "fields": [
+                "optional_data"
+              ],
+              "status": "passed"
+            },
+            {
+              "code": "mrz_composite_check_digit",
+              "detail": "expected 0, calculated 0",
+              "fields": [
+                "document_number",
+                "date_of_birth",
+                "date_of_expiry",
+                "optional_data"
+              ],
+              "status": "passed"
+            }
+          ]
+        },
+        "success": true,
+        "validations": [
+          {
+            "code": "required_visible_fields",
+            "detail": null,
+            "fields": [],
+            "status": "passed"
+          },
+          {
+            "code": "visible_mrz_surname",
+            "detail": null,
+            "fields": [
+              "surname",
+              "mrz.surname"
+            ],
+            "status": "passed"
+          },
+          {
+            "code": "visible_mrz_name",
+            "detail": null,
+            "fields": [
+              "name",
+              "mrz.given_names"
+            ],
+            "status": "passed"
+          },
+          {
+            "code": "visible_mrz_passport_number",
+            "detail": null,
+            "fields": [
+              "passport_number",
+              "mrz.document_number"
+            ],
+            "status": "passed"
+          },
+          {
+            "code": "visible_mrz_date_of_birth",
+            "detail": "visible text '01.01.2000' conflicts with MRZ '000000'",
+            "fields": [
+              "date_of_birth",
+              "mrz.date_of_birth"
+            ],
+            "status": "failed"
+          },
+          {
+            "code": "visible_mrz_sex",
+            "detail": null,
+            "fields": [
+              "sex",
+              "mrz.sex"
+            ],
+            "status": "passed"
+          },
+          {
+            "code": "visible_mrz_date_of_expiry",
+            "detail": "visible text '01.01.2030' conflicts with MRZ '000000'",
+            "fields": [
+              "date_of_expiry",
+              "mrz.date_of_expiry"
+            ],
+            "status": "failed"
+          }
+        ],
+        "warnings": []
+      },
+      {
+        "error": {
+          "code": "invalid_upload",
+          "detail": "Upload must be a decodable image"
+        },
+        "success": false
+      }
+    ],
+    "succeeded": 1,
+    "total": 2
+  }
+}

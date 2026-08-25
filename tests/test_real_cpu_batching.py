@@ -13,7 +13,7 @@ from app.models import Models
 MODEL_ROOT = Path.home() / ".paddlex"
 HAS_MODELS = all(
     (MODEL_ROOT / "official_models" / name / "inference.pdiparams").is_file()
-    for name in ("PP-OCRv6_medium_det", "PP-OCRv6_medium_rec")
+    for name in ("PP-OCRv6_medium_det", "latin_PP-OCRv5_mobile_rec")
 )
 
 

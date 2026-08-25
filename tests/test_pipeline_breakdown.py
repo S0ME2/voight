@@ -6,10 +6,12 @@ from pathlib import Path
 
 import numpy as np
 
-from scripts.benchmarking.pipeline_breakdown import (
+from benchmarks.maintained.pipeline_breakdown import (
     Document,
     Run,
+    _batch_details,
     _localize,
+    _stage_values,
     cycles,
     consumed_physical_count,
     score,
@@ -20,10 +22,29 @@ from scripts.benchmarking.pipeline_breakdown import (
 )
 from app.config import Settings
 from app.inference.contracts import DetectedTextRegion, DetectedTextRegions, RecognitionResult
-from scripts.benchmarking.optimization_six import fixed_rows
+from benchmarks.historical.optimization_six import fixed_rows
 
 
 class PipelineBreakdownTests(unittest.TestCase):
+    def test_final_stage_report_keeps_requested_buckets_and_batch_evidence(self):
+        diagnostics = {
+            "localization": {"docaligner": {"wall_seconds": 1.0}},
+            "pipeline": {"canonicalization_seconds": 0.2, "mrz_crop_preprocess_seconds": 0.1, "parsing_validation_seconds": 0.3},
+            "text_detection": {"wall_seconds": 0.4, "calls": [{"tensor_batch_size": 2, "submitted_input_shapes": [[10, 20, 3], [10, 20, 3]]}]},
+            "text_recognition": {"wall_seconds": 0.5, "calls": [{"tensor_batch_size": 2, "input_widths": [20, 30], "input_heights": [10, 10]}], "packing_strategy": "aspect-ratio"},
+            "mrz_recognition": {"wall_seconds": 0.6, "calls": []},
+            "line_crop_seconds": 0.05,
+            "line_filter": {"detected_line_count": 3, "recognition_candidate_count": 2, "filtered_before_recognition_count": 1},
+            "process_peak_rss_mb": 123.0,
+        }
+        stages = _stage_values(diagnostics, 3.5)
+        self.assertEqual(set(stages), {"localization", "canonicalization", "detection", "roi_filtering_cropping", "recognition", "mrz_work", "parsing_validation", "other"})
+        self.assertAlmostEqual(stages["mrz_work"], 0.7)
+        details = _batch_details(diagnostics)
+        self.assertEqual(details["detection"][0]["tensor_batch_size"], 2)
+        self.assertEqual(details["recognition"][0]["input_widths"], [20, 30])
+        self.assertEqual(details["process_peak_rss_mb"], 123.0)
+
     def test_fixed_rows_preserve_expected_order_and_count(self):
         image = np.zeros((300, 40, 3), dtype=np.uint8)
         rows = fixed_rows(image, 3)
@@ -35,10 +56,10 @@ class PipelineBreakdownTests(unittest.TestCase):
         self.assertEqual(stats([1.0, 2.0, 100.0]), {"median": 2.0, "min": 1.0, "max": 100.0, "mad": 1.0, "iqr": 49.5})
 
     def test_environment_counts_unique_core_socket_pairs(self):
-        from scripts.benchmarking.pipeline_breakdown import environment
+        from benchmarks.maintained.pipeline_breakdown import environment
         settings = Settings.from_env()
         payload = "# CPU,Core,Socket\n0,0,0\n1,0,0\n2,1,0\n3,1,0\n4,0,1\n"
-        with patch("scripts.benchmarking.pipeline_breakdown.subprocess.check_output", side_effect=lambda command, **kwargs: payload if command[:2] == ["lscpu", "-p=CPU,CORE,SOCKET"] else "commit\n"):
+        with patch("benchmarks.maintained.pipeline_breakdown.subprocess.check_output", side_effect=lambda command, **kwargs: payload if command[:2] == ["lscpu", "-p=CPU,CORE,SOCKET"] else "commit\n"):
             value = environment(settings, {"counts": {}}, "now")
         self.assertEqual(value["cpu"]["physical_cores"], 3)
 
@@ -123,8 +144,8 @@ class PipelineBreakdownTests(unittest.TestCase):
             def text_recognizer(self): return self.recognizer
 
         settings = Settings.from_env()
-        image = Path("dataset/driving_license/d_1.jpg")
-        document = Document("driving_license", "d_1", (("image", image),), Path("dataset/annotations/driving_license/d_1.json"))
+        image = Path("annotation_input/driving_licenses/test_license_canonical.jpg")
+        document = Document("driving_license", "test_license_canonical", (("image", image),), Path("annotations/evaluation_ground_truth.json"))
         models = ModelsStub()
         run_partial(settings, models, [document], "driving_license", "driving_license_localization_preparation_only")
         self.assertEqual(models.detector.calls, 0)

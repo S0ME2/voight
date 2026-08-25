@@ -1,6 +1,13 @@
 from contextlib import asynccontextmanager
+import json
+import logging
+import os
 
 from dotenv import load_dotenv
+
+load_dotenv()
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
@@ -8,6 +15,8 @@ from app.api.v1 import create_v1_router
 from app.contracts import ErrorCode, ErrorResult
 from app.config import Settings
 from app.models import Models
+
+logger = logging.getLogger("uvicorn.error")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -18,6 +27,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         models.preload()
+        if configuration := getattr(models, "configuration", None):
+            logger.info("effective Voight configuration: %s", json.dumps(configuration(), sort_keys=True, default=str))
         try:
             yield
         finally:
@@ -36,6 +47,4 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(status_code=exc.status_code, content={"error": ErrorResult(code=code, detail=str(detail)).model_dump(mode="json")})
     return app
 
-
-load_dotenv()
 app = create_app()

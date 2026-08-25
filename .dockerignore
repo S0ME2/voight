@@ -1,14 +1,36 @@
-.git
+# VCS
+
+# Virtual environment
 .venv
+
+# Bytecode
 __pycache__
 *.py[cod]
+
+# Environment
 .env
-annotation_input
-annotations
-assets
-complexity
+
+# Local data and generated artifacts
 dataset
 logs
-outputs
 logs-from-container
+outputs
+models
+.paddlex
+
+# Governance (not needed in container)
 .codex
+
+# IDE / OS
+.DS_Store
+*.bak
+code.zip
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+
+# Personal/local config
+.claude
+.personal

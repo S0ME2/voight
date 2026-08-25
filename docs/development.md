@@ -19,9 +19,10 @@ Never install or execute `requirements/gpu.txt` locally. The complete local
 suite is CPU-safe; its real-model batching test uses a local prepared Paddle
 cache when present and skips otherwise.
 
-Historical experiments are optional and not part of the normal environment.
-Use their separate `requirements/experiments.txt` only in an isolated CPU
-environment; never mix it into the production or GPU images.
+Historical exploration scripts are preserved under `archive/scripts-experiments/`.
+They are optional and not part of the normal environment. Use their separate
+`requirements/experiments.txt` only in an isolated CPU environment; never mix
+it into the production or GPU images.
 
 ## Adding a supported document layout
 

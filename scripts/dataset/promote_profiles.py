@@ -74,23 +74,24 @@ def _canonical_region(sample: dict, width: int, height: int) -> tuple[dict, dict
     return crop, rois
 
 
-def promote(annotation_state: Path, config_dir: Path, passport_anchor: Path | None = None) -> None:
+def _planned_writes(annotation_state: Path, config_dir: Path, passport_anchor: Path | None) -> dict[Path, str]:
+    """Compute every file promotion writes without touching the filesystem."""
     state = json.loads(annotation_state.read_text(encoding="utf-8"))
     grouped: dict[str, list[dict]] = {}
     for sample in state["samples"].values():
         if sample.get("status") == "complete":
             grouped.setdefault(sample["layout"], []).append(sample)
 
+    planned: dict[Path, str] = {}
     for layout, samples in grouped.items():
         if layout == "driving_license":
             # The licence input is already canonical; runtime config is generated,
             # never separately annotated.
             sample = samples[0]
-            destination = config_dir.parent / "driving_license"
-            destination.mkdir(parents=True, exist_ok=True)
             crop, rois = _canonical_region(sample, 1000, 630)
-            (destination / "data_crop.json").write_text(json.dumps({"data_crop": crop}, indent=2) + "\n", encoding="utf-8")
-            (destination / "field_rois_crop.json").write_text(json.dumps(rois, indent=2) + "\n", encoding="utf-8")
+            destination = config_dir.parent / "driving_license"
+            planned[destination / "data_crop.json"] = json.dumps({"data_crop": crop}, indent=2) + "\n"
+            planned[destination / "field_rois_crop.json"] = json.dumps(rois, indent=2) + "\n"
             continue
         destination = config_dir / ("uz_passport" if layout == "uzbekistan_passport" else "uz_id_card") / "profile.json"
         existing = json.loads(destination.read_text(encoding="utf-8"))
@@ -122,7 +123,30 @@ def promote(annotation_state: Path, config_dir: Path, passport_anchor: Path | No
             }
         else:
             profile.pop("document_localization", None)
-        destination.write_text(json.dumps(profile, indent=2) + "\n", encoding="utf-8")
+        planned[destination] = json.dumps(profile, indent=2) + "\n"
+    return planned
+
+
+def promote(annotation_state: Path, config_dir: Path, passport_anchor: Path | None = None) -> None:
+    for path, content in _planned_writes(annotation_state, config_dir, passport_anchor).items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+
+def _display(path: Path) -> str:
+    try:
+        return path.relative_to(ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def check(annotation_state: Path, config_dir: Path, passport_anchor: Path | None = None) -> list[str]:
+    """Return the paths where promoting would differ from the current config."""
+    drift = []
+    for path, content in sorted(_planned_writes(annotation_state, config_dir, passport_anchor).items()):
+        if not path.is_file() or path.read_text(encoding="utf-8") != content:
+            drift.append(_display(path))
+    return drift
 
 
 def main() -> None:
@@ -130,8 +154,16 @@ def main() -> None:
     parser.add_argument("--annotations", type=Path, default=ROOT / "annotations" / "annotation_state.json")
     parser.add_argument("--config-dir", type=Path, default=ROOT / "config" / "documents")
     parser.add_argument("--passport-mrz-anchor", type=Path, default=ROOT / "annotations" / "previews" / "passport_mrz.json")
+    parser.add_argument("--check", action="store_true", help="verify config matches the annotations without writing")
     args = parser.parse_args()
-    promote(args.annotations, args.config_dir, args.passport_mrz_anchor if args.passport_mrz_anchor.is_file() else None)
+    anchor = args.passport_mrz_anchor if args.passport_mrz_anchor.is_file() else None
+    if args.check:
+        drift = check(args.annotations, args.config_dir, anchor)
+        for path in drift:
+            print(f"would update {path}")
+        print("config profiles match the current annotations" if not drift else "promoting would change the files above")
+        raise SystemExit(1 if drift else 0)
+    promote(args.annotations, args.config_dir, anchor)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.config import ModelSettings, ProfileSettings, RuntimeSettings, Settings
+from app.models import Models
 
 
 class SettingsTests(unittest.TestCase):
@@ -15,6 +16,12 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.runtime.target, "cpu")
         self.assertEqual(settings.ocr.device, "cpu")
         self.assertGreater(settings.runtime.cpu_threads, 0)
+        self.assertEqual(4, settings.runtime.localization_batch_size)
+        self.assertEqual(1, settings.runtime.text_detection_batch_size)
+        self.assertEqual(2, settings.runtime.text_recognition_batch_size)
+        self.assertEqual(2, settings.runtime.mrz_recognition_batch_size)
+        self.assertEqual("fixed-width", settings.runtime.text_recognition_packing)
+        self.assertEqual(1.50, settings.mrz.contrast)
 
     def test_runtime_and_device_must_match(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -123,6 +130,24 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual("document-z", settings.models.localization.document_backend)
         self.assertEqual("mrz-localizer-z", settings.models.localization.mrz_backend)
         self.assertEqual("mrz-recognizer-z", settings.models.mrz.recognizer_backend)
+
+    def test_detector_resize_settings_are_typed_and_reported(self):
+        with patch.dict(
+            os.environ,
+            {"TEXT_DETECTOR_PIXEL_SCALE": "0.5", "TEXT_DETECTOR_LIMIT_SIDE_LEN": "640"},
+            clear=True,
+        ):
+            settings = Settings.from_env()
+        self.assertEqual(0.5, settings.runtime.text_detector_pixel_scale)
+        self.assertEqual(640, settings.runtime.text_detector_limit_side_len)
+        resize = Models(settings).configuration()["text_detector"]["resize"]
+        self.assertEqual(25.0, resize["effective_percent"])
+        self.assertEqual(640, resize["limit_side_len_override"])
+
+    def test_detector_resize_settings_validate_at_startup(self):
+        with patch.dict(os.environ, {"TEXT_DETECTOR_PIXEL_SCALE": "0"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "TEXT_DETECTOR_PIXEL_SCALE"):
+                Settings.from_env()
 
 
 if __name__ == "__main__":

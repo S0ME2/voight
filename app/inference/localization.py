@@ -47,6 +47,8 @@ class DocAlignerBatchLocalizer:
     def providers(self) -> list[str]:
         return list(self.engine.providers)
 
+    supports_batch = True
+
     def localize_batch(self, images: Sequence[np.ndarray]) -> list[LocalizationResult]:
         infos = [
             self.preprocess(
@@ -76,6 +78,28 @@ class DocAlignerBatchLocalizer:
             )
             for index, info in enumerate(infos)
         ]
+
+
+class PointDocAlignerLocalizer:
+    """Adapter for the pinned point graph, whose ONNX input is batch-one."""
+
+    supports_batch = False
+
+    def __init__(self, aligner: Any):
+        self.inference = aligner.detector
+        self.engine = self.inference.model
+
+    @property
+    def providers(self) -> list[str]:
+        return list(self.engine.providers)
+
+    def localize_batch(self, images: Sequence[np.ndarray]) -> list[LocalizationResult]:
+        started = time.perf_counter()
+        values = [self.inference(image) for image in images]
+        self.last_model_seconds = time.perf_counter() - started
+        self.last_tensor_batch_size = 1 if values else 0
+        self.last_tensor_batch_sizes = [1] * len(values)
+        return [LocalizationResult(np.asarray(value, dtype=np.float32)) for value in values]
 
 
 class MrzScannerBatchLocalizer:

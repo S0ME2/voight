@@ -4,26 +4,35 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import math
+import os
 import time
 from copy import deepcopy
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import Any, Literal, TypeVar
 
 import cv2
 import numpy as np
 
 from app.artifacts import ArtifactWriter
 from app.config import MrzSettings
-from app.documents.mrz import MrzProfile, crop_polygon, preprocess, reconstruct, select
+from app.documents.mrz import MrzProfile, apply_contrast, crop_polygon, preprocess, reconstruct, select
 from app.documents.passport_localization import page_corners_from_mrz_width
 from app.imaging import order_corners, warp_to_size
+from app.imaging import preprocess_variant
 from app.inference.contracts import MrzRecognitionResult
 from app.inference.packing import SequentialBatchPacker
 from app.pipeline import RegionProfile, complete_profile, prepare_profile_from_detection
 from app.roi import roi_for_point
 
 Token = dict[str, Any]
+logger = logging.getLogger(__name__)
+ChunkKey = TypeVar("ChunkKey")
+ChunkValue = TypeVar("ChunkValue")
+ChunkFailurePolicy = Literal["bisect", "whole"]
 
 
 class QueueFullError(RuntimeError):
@@ -40,6 +49,8 @@ class OcrSample:
     image: np.ndarray
     recognition_rois: dict[str, dict[str, float]] | None = None
     role: str | None = None
+    document_id: str | None = None
+    field_association: str | None = None
 
 
 @dataclass(frozen=True)
@@ -98,6 +109,32 @@ def _is_resource_error(error: BaseException) -> bool:
     )
 
 
+def _execute_chunk(
+    items: Sequence[tuple[ChunkKey, Any]],
+    execute: Callable[[Sequence[tuple[ChunkKey, Any]]], Sequence[ChunkValue]],
+    stats: dict[str, int],
+    *,
+    failure_policy: ChunkFailurePolicy,
+) -> tuple[dict[ChunkKey, ChunkValue], dict[ChunkKey, Exception]]:
+    try:
+        values = list(execute(items))
+        if len(values) != len(items):
+            raise ValueError(f"chunk returned {len(values)} results for {len(items)} inputs")
+    except Exception as error:
+        if isinstance(error, ResourceExhaustedError) or _is_resource_error(error):
+            raise
+        if failure_policy == "bisect" and len(items) > 1:
+            stats["retry_split_count"] += 1
+            midpoint = len(items) // 2
+            left = _execute_chunk(items[:midpoint], execute, stats, failure_policy=failure_policy)
+            right = _execute_chunk(items[midpoint:], execute, stats, failure_policy=failure_policy)
+            return left[0] | right[0], left[1] | right[1]
+        if failure_policy == "bisect":
+            stats["isolated_failure_count"] += 1
+        return {}, {key: error for key, _ in items}
+    return {key: value for (key, _), value in zip(items, values)}, {}
+
+
 def _shape_stats(images: Sequence[np.ndarray]) -> dict[str, float]:
     ratios = [image.shape[1] / max(1, image.shape[0]) for image in images]
     padded = max(ratios) * len(ratios)
@@ -133,6 +170,10 @@ def _call_shape_stats(
         "padded_tensor_pixel_area": padded_area if transformed else None,
         "padding_efficiency": unpadded_area / padded_area if transformed and padded_area else None,
         "shape_metric_source": "padded model input" if transformed else "source crops; backend transform unavailable",
+        "submitted_input_shapes": [
+            [int(image.shape[0]), int(image.shape[1]), *([int(image.shape[2])] if image.ndim == 3 else [])]
+            for image in images
+        ],
     }
     if not transformed:
         ratios = [width / max(1, height) for width, height in zip(widths, heights)]
@@ -154,6 +195,10 @@ def _sample_digest(image: np.ndarray) -> str:
 
 def _text_digest(lines: Sequence[str]) -> str:
     return hashlib.sha256(json.dumps(list(lines), ensure_ascii=False).encode()).hexdigest()
+
+
+def _trace_stem(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()[:20]
 
 
 def _finish_stage(stage: dict[str, Any]) -> None:
@@ -202,17 +247,27 @@ class BatchedOcr:
         *,
         detection_batch_size: int,
         recognition_batch_size: int,
+        mrz_recognition_batch_size: int | None = None,
         recognition_packer: Any | None = None,
         capture_inputs: bool = False,
+        mrz_contrast: float = 1.50,
+        detector_preprocessing: str = "original",
+        visible_preprocessing: str = "original",
+        mrz_preprocessing: str = "contrast_1.50",
     ):
-        if detection_batch_size <= 0 or recognition_batch_size <= 0:
+        if detection_batch_size <= 0 or recognition_batch_size <= 0 or (mrz_recognition_batch_size is not None and mrz_recognition_batch_size <= 0):
             raise ValueError("OCR batch sizes must be greater than zero")
         self.detector = detector
         self.recognizer = recognizer
         self.detection_batch_size = detection_batch_size
         self.recognition_batch_size = recognition_batch_size
+        self.mrz_recognition_batch_size = mrz_recognition_batch_size or recognition_batch_size
         self.recognition_packer = recognition_packer or SequentialBatchPacker()
         self.capture_inputs = capture_inputs
+        self.mrz_contrast = mrz_contrast
+        self.detector_preprocessing = detector_preprocessing
+        self.visible_preprocessing = visible_preprocessing
+        self.mrz_preprocessing = mrz_preprocessing
         self.captured_inputs: dict[str, np.ndarray] = {}
 
     def _predict_chunk(
@@ -224,71 +279,87 @@ class BatchedOcr:
         stats: dict[str, int],
         roles: Sequence[str],
         source_images: Sequence[np.ndarray],
+        crop_metadata: Sequence[dict[str, Any]] | None = None,
     ) -> tuple[dict[int, Any], dict[int, Exception]]:
-        started = time.perf_counter()
-        size = len(indexed_images)
-        try:
-            images = [image for _, image in indexed_images]
-            values = list(
-                model.detect_batch(images)
-                if stage_name == "text detection"
-                else model.recognize_batch(images)
-            )
-            if len(values) != size:
-                raise ValueError(f"{stage_name} returned {len(values)} results for {size} inputs")
-        except Exception as error:
-            if _is_resource_error(error):
-                raise ResourceExhaustedError(f"{stage_name} resource failure") from error
-            calls.append(
-                {
+        role_by_key = dict(zip((index for index, _ in indexed_images), roles))
+        source_by_key = dict(zip((index for index, _ in indexed_images), source_images))
+        metadata_by_key = dict(zip((index for index, _ in indexed_images), crop_metadata or ()))
+
+        def execute(chunk: Sequence[tuple[int, np.ndarray]]) -> Sequence[Any]:
+            started = time.perf_counter()
+            size = len(chunk)
+            images = [image for _, image in chunk]
+            try:
+                values = list(model.detect_batch(images) if stage_name == "text detection" else model.recognize_batch(images))
+                if len(values) != size:
+                    raise ValueError(f"{stage_name} returned {len(values)} results for {size} inputs")
+            except Exception as error:
+                elapsed = time.perf_counter() - started
+                logger.warning("%s chunk execution failed", stage_name, exc_info=True)
+                calls.append({
                     "submitted_batch_size": size,
                     "tensor_batch_size": size,
                     "failure_count": size,
-                    "model_seconds": time.perf_counter() - started,
-                    "wall_seconds": time.perf_counter() - started,
+                    "model_seconds": elapsed,
+                    "wall_seconds": elapsed,
                     "error_type": type(error).__name__,
                     **_call_shape_stats(
-                        [image for _, image in indexed_images],
-                        source_images,
-                        "mixed" if len(set(roles)) > 1 else roles[0],
+                        images,
+                        [source_by_key[index] for index, _ in chunk],
+                        "mixed" if len({role_by_key[index] for index, _ in chunk}) > 1 else role_by_key[chunk[0][0]],
                         transformed=stage_name == "text detection",
                     ),
-                    **(_shape_stats([image for _, image in indexed_images]) if stage_name == "text recognition" else {}),
-                }
-            )
-            if size == 1:
-                stats["isolated_failure_count"] += 1
-                return {}, {indexed_images[0][0]: error}
-            stats["retry_split_count"] += 1
-            midpoint = size // 2
-            left_results, left_failures = self._predict_chunk(
-                stage_name, model, indexed_images[:midpoint], calls, stats
-                , roles[:midpoint], source_images[:midpoint]
-            )
-            right_results, right_failures = self._predict_chunk(
-                stage_name, model, indexed_images[midpoint:], calls, stats
-                , roles[midpoint:], source_images[midpoint:]
-            )
-            return left_results | right_results, left_failures | right_failures
-        elapsed = time.perf_counter() - started
-        model_seconds = getattr(model, "last_model_seconds", None) or elapsed
-        calls.append(
-            {
+                    **(_shape_stats(images) if stage_name == "text recognition" else {}),
+                })
+                if _is_resource_error(error):
+                    raise ResourceExhaustedError(f"{stage_name} resource failure") from error
+                raise
+            elapsed = time.perf_counter() - started
+            model_seconds = getattr(model, "last_model_seconds", None) or elapsed
+            tensor_batch_sizes = list(getattr(model, "last_tensor_batch_sizes", ()) or (size,))
+            calls.append({
                 "submitted_batch_size": size,
-                "tensor_batch_size": size,
+                "tensor_batch_size": getattr(model, "last_tensor_batch_size", max(tensor_batch_sizes)),
+                "tensor_batch_sizes": tensor_batch_sizes,
                 "failure_count": 0,
                 "model_seconds": model_seconds,
                 "wall_seconds": elapsed,
                 **_call_shape_stats(
-                    [image for _, image in indexed_images],
-                    source_images,
-                    "mixed" if len(set(roles)) > 1 else roles[0],
+                    images,
+                    [source_by_key[index] for index, _ in chunk],
+                    "mixed" if len({role_by_key[index] for index, _ in chunk}) > 1 else role_by_key[chunk[0][0]],
                     transformed=stage_name == "text detection",
                 ),
-                **(_shape_stats([image for _, image in indexed_images]) if stage_name == "text recognition" else {}),
-            }
-        )
-        return {index: value for (index, _), value in zip(indexed_images, values)}, {}
+                **(_shape_stats(images) if stage_name == "text recognition" else {}),
+            })
+            if tensor_shapes := getattr(model, "last_tensor_shapes", None):
+                calls[-1]["tensor_shapes"] = tensor_shapes
+            if tensor_pixels := getattr(model, "last_tensor_pixel_counts", None):
+                calls[-1]["tensor_pixel_counts"] = tensor_pixels
+            if resized_shapes := getattr(model, "last_resized_shapes", None):
+                calls[-1]["detector_resized_shapes"] = resized_shapes
+            if resize_config := getattr(model, "last_resize_config", None):
+                calls[-1]["detector_resize_config"] = resize_config
+            if stage_name == "text detection":
+                calls[-1]["polygon_coordinate_space"] = "full canonical source image after inverse resize mapping"
+            if stage_name == "text recognition" and crop_metadata is not None:
+                traces = list(getattr(model, "last_crop_traces", ()) or ())
+                calls[-1]["crop_records"] = [
+                    {
+                        **metadata_by_key[index],
+                        "batch_index": len(calls) - 1,
+                        "batch_position": position,
+                        **(traces[position] if position < len(traces) else {}),
+                        "useful_pixels": metadata_by_key[index].get("useful_pixels", (traces[position].get("useful_pixels", 0) if position < len(traces) else 0)),
+                        "packed_model_input_sha256": _sample_digest(images[position]),
+                        "packed_model_input_h": int(images[position].shape[0]),
+                        "packed_model_input_w": int(images[position].shape[1]),
+                    }
+                    for position, (index, _) in enumerate(chunk)
+                ]
+            return values
+
+        return _execute_chunk(indexed_images, execute, stats, failure_policy="bisect")
 
     def run(self, samples: Sequence[OcrSample]) -> OcrBatchResult:
         ids = [sample.item_id for sample in samples]
@@ -323,6 +394,7 @@ class BatchedOcr:
                 "samples": {},
             },
             "line_crop_seconds": 0.0,
+            "preprocessing_seconds": {"detector": 0.0, "visible": 0.0, "mrz": 0.0},
             "result_unpack_seconds": 0.0,
             "sample_records": [
                 {
@@ -342,10 +414,17 @@ class BatchedOcr:
         detection_results: dict[int, Any] = {}
         errors = dict(invalid)
         for chunk in _chunks(valid, self.detection_batch_size):
+            preprocess_started = time.perf_counter()
+            detection_images = (
+                [(index, preprocess_variant(image, self.detector_preprocessing)) for index, image in chunk]
+                if getattr(self.detector, "preserves_source_shapes", False)
+                else _pad_detection_batch([(index, preprocess_variant(image, self.detector_preprocessing)) for index, image in chunk])
+            )
+            diagnostics["preprocessing_seconds"]["detector"] += time.perf_counter() - preprocess_started
             results, failures = self._predict_chunk(
                 "text detection",
                 self.detector,
-                _pad_detection_batch(chunk),
+                detection_images,
                 diagnostics["text_detection"]["calls"],
                 diagnostics["text_detection"],
                 [_sample_role(samples[index]) for index, _ in chunk],
@@ -356,6 +435,7 @@ class BatchedOcr:
 
         line_crop_started = time.perf_counter()
         lines: list[tuple[int, np.ndarray, np.ndarray]] = []
+        line_metadata: list[dict[str, Any]] = []
         line_crop_seconds_by_role = {"visible": 0.0, "mrz": 0.0}
         for sample_index, result in detection_results.items():
             if result.error:
@@ -386,6 +466,7 @@ class BatchedOcr:
                     line_crop_seconds_by_role.setdefault(role, 0.0)
                     line_crop_seconds_by_role[role] += time.perf_counter() - crop_started
                 except (cv2.error, TypeError, ValueError) as error:
+                    logger.warning("OCR line crop failed for %s", sample.item_id, exc_info=True)
                     errors[sample_index] = error
                     lines = [line for line in lines if line[0] != sample_index]
                     diagnostics["line_filter"]["recognition_candidate_count"] -= counts["recognition_candidate_count"]
@@ -395,6 +476,27 @@ class BatchedOcr:
                     diagnostics["line_filter"]["filtered_before_recognition_count"] += dropped
                     break
                 lines.append((sample_index, crop, ordered))
+                if os.getenv("VOIGHT_BENCHMARK_MRZ_TRACE") and role == "mrz":
+                    trace_dir = Path(os.environ["VOIGHT_BENCHMARK_MRZ_TRACE"])
+                    trace_dir.mkdir(parents=True, exist_ok=True)
+                    np.save(trace_dir / f"{_trace_stem(sample.item_id)}__line_{len(lines) - 1}.npy", crop)
+                line_metadata.append({
+                    "line_index": len(lines) - 1,
+                    "sample_id": sample.item_id,
+                    "document_id": sample.document_id or sample.item_id,
+                    "role": role,
+                    "field_association": sample.field_association or (
+                        "mrz" if role == "mrz" else roi_for_point(
+                            sample.recognition_rois or {}, width, height, float(center_x), float(center_y)
+                        )
+                    ),
+                    "original_crop_h": int(crop.shape[0]),
+                    "original_crop_w": int(crop.shape[1]),
+                    "crop_sha256": _sample_digest(crop),
+                    "natural_resized_h": 48,
+                    "natural_resized_w": min(3200, max(1, math.ceil(48 * crop.shape[1] / max(1, crop.shape[0])))),
+                    "useful_pixels": 48 * min(3200, max(1, math.ceil(48 * crop.shape[1] / max(1, crop.shape[0])))),
+                })
                 counts["recognition_candidate_count"] += 1
                 diagnostics["line_filter"]["recognition_candidate_count"] += 1
         diagnostics["line_crop_seconds"] = time.perf_counter() - line_crop_started
@@ -402,10 +504,34 @@ class BatchedOcr:
 
         recognition_results: dict[int, Any] = {}
         recognition_errors: dict[int, Exception] = {}
-        recognition_chunks = self.recognition_packer.pack(
-            [(index, line[1]) for index, line in enumerate(lines)],
-            self.recognition_batch_size,
-        )
+        recognition_inputs = []
+        for index, line in enumerate(lines):
+            image = line[1]
+            role = _sample_role(samples[line[0]])
+            preprocess_started = time.perf_counter()
+            image = preprocess_variant(image, self.mrz_preprocessing if role == "mrz" else self.visible_preprocessing)
+            diagnostics["preprocessing_seconds"]["mrz" if role == "mrz" else "visible"] += time.perf_counter() - preprocess_started
+            if role == "mrz":
+                line_metadata[index].update({
+                    "mrz_line_contrast": self.mrz_contrast,
+                    "mrz_line_preprocessing": self.mrz_preprocessing,
+                    "mrz_line_preprocessing_stage": "raw line crop before fixed-width packing",
+                    "processed_crop_sha256": _sample_digest(image),
+                    "processed_crop_h": int(image.shape[0]),
+                    "processed_crop_w": int(image.shape[1]),
+                })
+            recognition_inputs.append((index, image))
+        if self.mrz_recognition_batch_size == self.recognition_batch_size:
+            recognition_chunks = self.recognition_packer.pack(recognition_inputs, self.recognition_batch_size)
+        else:
+            recognition_chunks = []
+            for role in ("visible", "mrz"):
+                role_inputs = [
+                    item for item in recognition_inputs
+                    if _sample_role(samples[lines[item[0]][0]]) == role
+                ]
+                role_batch_size = self.mrz_recognition_batch_size if role == "mrz" else self.recognition_batch_size
+                recognition_chunks.extend(self.recognition_packer.pack(role_inputs, role_batch_size))
         recognition_started = time.perf_counter()
         for chunk in recognition_chunks:
             results, failures = self._predict_chunk(
@@ -413,6 +539,7 @@ class BatchedOcr:
                 diagnostics["text_recognition"]["calls"], diagnostics["text_recognition"],
                 [_sample_role(samples[lines[line_index][0]]) for line_index, _ in chunk],
                 [lines[line_index][1] for line_index, _ in chunk],
+                [line_metadata[line_index] for line_index, _ in chunk],
             )
             recognition_results.update(results)
             recognition_errors.update(failures)
@@ -504,6 +631,7 @@ class ProfileBatchItem:
     mrz_profile: MrzProfile | None = None
     probe_mrz: bool = False
     mrz_fallback_for: str | None = None
+    document_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -528,6 +656,7 @@ class ProfileBatchRunner:
         max_items: int,
         mrz_recognizer: Any | None = None,
         mrz_recognition_batch_size: int | None = None,
+        mrz_recognizer_config: str | None = None,
         ocr_grouping: str = "combined",
     ):
         if localization_batch_size <= 0 or max_items <= 0 or (
@@ -541,6 +670,7 @@ class ProfileBatchRunner:
         self.mrz_settings = mrz_settings
         self.localization_batch_size = localization_batch_size
         self.mrz_recognizer = mrz_recognizer
+        self.mrz_recognizer_config = mrz_recognizer_config
         self.mrz_recognition_batch_size = mrz_recognition_batch_size or ocr.recognition_batch_size
         self.max_items = max_items
         self.ocr_grouping = ocr_grouping
@@ -582,37 +712,34 @@ class ProfileBatchRunner:
         calls: list[dict[str, Any]],
         stats: dict[str, int],
     ) -> tuple[dict[str, MrzRecognitionResult], dict[str, Exception]]:
-        started = time.perf_counter()
-        size = len(indexed_images)
-        try:
-            values = list(self.mrz_recognizer.recognize_batch([image for _, image in indexed_images]))
-            if len(values) != size:
-                raise ValueError(f"MRZ recognition returned {len(values)} results for {size} inputs")
-        except Exception as error:
-            if _is_resource_error(error):
-                raise ResourceExhaustedError("MRZ recognition resource failure") from error
+        def execute(chunk: Sequence[tuple[str, np.ndarray]]) -> Sequence[MrzRecognitionResult]:
+            started = time.perf_counter()
+            size = len(chunk)
+            try:
+                values = list(self.mrz_recognizer.recognize_batch([image for _, image in chunk]))
+                if len(values) != size:
+                    raise ValueError(f"MRZ recognition returned {len(values)} results for {size} inputs")
+            except Exception as error:
+                elapsed = time.perf_counter() - started
+                logger.warning("MRZ recognition chunk execution failed", exc_info=True)
+                calls.append({"submitted_batch_size": size, "tensor_batch_size": size, "failure_count": size, "model_seconds": elapsed, "wall_seconds": elapsed, "error_type": type(error).__name__})
+                if _is_resource_error(error):
+                    raise ResourceExhaustedError("MRZ recognition resource failure") from error
+                raise
             elapsed = time.perf_counter() - started
-            calls.append({"submitted_batch_size": size, "tensor_batch_size": size, "failure_count": size, "model_seconds": elapsed, "wall_seconds": elapsed, "error_type": type(error).__name__})
-            if size == 1:
-                stats["isolated_failure_count"] += 1
-                return {}, {indexed_images[0][0]: error}
-            stats["retry_split_count"] += 1
-            midpoint = size // 2
-            left, left_errors = self._recognize_mrz_chunk(indexed_images[:midpoint], calls, stats)
-            right, right_errors = self._recognize_mrz_chunk(indexed_images[midpoint:], calls, stats)
-            return left | right, left_errors | right_errors
-        elapsed = time.perf_counter() - started
-        call = {
-            "submitted_batch_size": size,
-            "tensor_batch_size": getattr(self.mrz_recognizer, "last_tensor_batch_size", size),
-            "failure_count": 0,
-            "model_seconds": getattr(self.mrz_recognizer, "last_model_seconds", elapsed),
-            "wall_seconds": elapsed,
-        }
-        if sizes := getattr(self.mrz_recognizer, "last_tensor_batch_sizes", None):
-            call["tensor_batch_sizes"] = list(sizes)
-        calls.append(call)
-        return {item_id: value for (item_id, _), value in zip(indexed_images, values)}, {}
+            call = {
+                "submitted_batch_size": size,
+                "tensor_batch_size": getattr(self.mrz_recognizer, "last_tensor_batch_size", size),
+                "failure_count": 0,
+                "model_seconds": getattr(self.mrz_recognizer, "last_model_seconds", elapsed),
+                "wall_seconds": elapsed,
+            }
+            if sizes := getattr(self.mrz_recognizer, "last_tensor_batch_sizes", None):
+                call["tensor_batch_sizes"] = list(sizes)
+            calls.append(call)
+            return values
+
+        return _execute_chunk(indexed_images, execute, stats, failure_policy="bisect")
 
     def _localize(
         self,
@@ -622,39 +749,46 @@ class ProfileBatchRunner:
         errors: dict[str, Exception] = {}
         stages: dict[str, Any] = {}
         for kind, jobs in groups.items():
-            stage = {"configured_batch_size": self.localization_batch_size, "calls": []}
+            stage = {"configured_batch_size": self.localization_batch_size, "calls": [], "retry_split_count": 0, "isolated_failure_count": 0}
             localizer = self.localizers[kind]
             for chunk in _chunks(jobs, self.localization_batch_size):
-                started = time.perf_counter()
-                size = len(chunk)
-                try:
-                    values = list(localizer.localize_batch([image for _, image in chunk]))
-                    if len(values) != size:
-                        raise ValueError(f"{kind} localization returned {len(values)} results for {size} inputs")
-                    if getattr(localizer, "last_tensor_batch_size", None) != size:
-                        raise ValueError(f"{kind} localization did not construct a tensor batch of {size}")
-                except Exception as error:
-                    if _is_resource_error(error):
-                        raise ResourceExhaustedError(f"{kind} localization resource failure") from error
-                    errors.update((item_id, error) for item_id, _ in chunk)
-                    failure_count = size
-                else:
-                    results.update(((item_id, kind), value) for (item_id, _), value in zip(chunk, values))
-                    failure_count = 0
-                elapsed = time.perf_counter() - started
-                call = {
-                    "submitted_batch_size": size,
-                    "failure_count": failure_count,
-                    "model_seconds": float(
-                        getattr(localizer, "last_model_seconds", elapsed)
-                        if failure_count == 0
-                        else elapsed
-                    ),
-                    "wall_seconds": elapsed,
-                }
-                if failure_count == 0:
-                    call["tensor_batch_size"] = localizer.last_tensor_batch_size
-                stage["calls"].append(call)
+                def execute(current: Sequence[tuple[str, np.ndarray]]) -> Sequence[Any]:
+                    started = time.perf_counter()
+                    size = len(current)
+                    try:
+                        values = list(localizer.localize_batch([image for _, image in current]))
+                        if len(values) != size:
+                            raise ValueError(f"{kind} localization returned {len(values)} results for {size} inputs")
+                        if getattr(localizer, "supports_batch", True) and getattr(localizer, "last_tensor_batch_size", None) != size:
+                            raise ValueError(f"{kind} localization did not construct a tensor batch of {size}")
+                    except Exception as error:
+                        elapsed = time.perf_counter() - started
+                        logger.warning("%s localization chunk execution failed", kind, exc_info=True)
+                        stage["calls"].append({
+                            "submitted_batch_size": size,
+                            "failure_count": size,
+                            "model_seconds": elapsed,
+                            "wall_seconds": elapsed,
+                        })
+                        if _is_resource_error(error):
+                            raise ResourceExhaustedError(f"{kind} localization resource failure") from error
+                        raise
+                    elapsed = time.perf_counter() - started
+                    call = {
+                        "submitted_batch_size": size,
+                        "failure_count": 0,
+                        "model_seconds": float(getattr(localizer, "last_model_seconds", elapsed)),
+                        "wall_seconds": elapsed,
+                        "tensor_batch_size": localizer.last_tensor_batch_size,
+                    }
+                    if sizes := getattr(localizer, "last_tensor_batch_sizes", None):
+                        call["tensor_batch_sizes"] = list(sizes)
+                    stage["calls"].append(call)
+                    return values
+
+                values, chunk_errors = _execute_chunk(chunk, execute, stage, failure_policy="whole")
+                results.update(((item_id, kind), value) for item_id, value in values.items())
+                errors.update(chunk_errors)
             _finish_stage(stage)
             stages[kind] = stage
         return results, errors, stages
@@ -743,6 +877,7 @@ class ProfileBatchRunner:
         }
         prepared: dict[str, Any] = {}
         mrz_polygons: dict[str, np.ndarray] = {}
+        mrz_crop_trace: list[dict[str, Any]] = []
         preparation_started = time.perf_counter()
         for item in items:
             if item.item_id in errors:
@@ -775,6 +910,7 @@ class ProfileBatchRunner:
                     started_total=started_total,
                 )
             except (cv2.error, IndexError, KeyError, TypeError, ValueError) as error:
+                logger.warning("profile preparation failed for %s", item.item_id, exc_info=True)
                 errors[item.item_id] = error
         preparation_seconds = time.perf_counter() - preparation_started
 
@@ -784,6 +920,7 @@ class ProfileBatchRunner:
                 prepared[item.item_id].data_crop,
                 prepared[item.item_id].profile.field_rois,
                 "visible",
+                item.document_id or (item.item_id.split(":", 2)[1] if ":" in item.item_id else item.item_id),
             )
             for item in items
             if item.item_id in prepared
@@ -797,7 +934,32 @@ class ProfileBatchRunner:
                 crop, expanded = crop_polygon(
                     item.image, mrz_polygons[item.item_id], self.mrz_settings.polygon_padding_ratio
                 )
-                processed = preprocess(crop, self.mrz_settings.max_side, self.mrz_settings.contrast)
+                normalized = preprocess(crop, self.mrz_settings.max_side)
+                processed = normalized
+                if os.getenv("VOIGHT_BENCHMARK_MRZ_TRACE"):
+                    mrz_crop_trace.append({
+                        "item_id": item.item_id,
+                        "document_id": item.document_id,
+                        "document_type": (
+                            "passport" if item.mrz_profile and item.mrz_profile.line_counts == (2,)
+                            else "id_card" if item.mrz_profile else None
+                        ),
+                        "source_image_sha256": _sample_digest(item.image),
+                        "raw_crop_sha256": _sample_digest(crop),
+                        "raw_crop_shape": list(crop.shape),
+                        "normalized_crop_sha256": _sample_digest(normalized),
+                        "normalized_crop_shape": list(normalized.shape),
+                        "crop_variant": "normalization_only",
+                        "processed_crop_sha256": _sample_digest(processed),
+                        "processed_crop_shape": list(processed.shape),
+                        "trace_stem": _trace_stem(f"mrz:{item.item_id}"),
+                    })
+                    trace_dir = Path(os.environ["VOIGHT_BENCHMARK_MRZ_TRACE"])
+                    trace_dir.mkdir(parents=True, exist_ok=True)
+                    stem = _trace_stem(f"mrz:{item.item_id}")
+                    np.save(trace_dir / f"{stem}__raw.npy", crop)
+                    np.save(trace_dir / f"{stem}__normalized.npy", normalized)
+                    np.save(trace_dir / f"{stem}__processed.npy", processed)
                 item.artifacts.save_json(
                     "mrz_polygons.json",
                     {"detected_polygon": mrz_polygons[item.item_id], "expanded_polygon": expanded},
@@ -805,10 +967,15 @@ class ProfileBatchRunner:
                 item.artifacts.save_image("mrz_crop.jpg", crop)
                 item.artifacts.save_image("mrz_preprocessed.png", processed)
                 if self.mrz_recognizer is None:
-                    ocr_samples.append(OcrSample(f"mrz:{item.item_id}", processed, role="mrz"))
+                    ocr_samples.append(OcrSample(
+                        f"mrz:{item.item_id}", processed, role="mrz",
+                        document_id=item.document_id or (item.item_id.split(":", 2)[1] if ":" in item.item_id else item.item_id),
+                        field_association="mrz",
+                    ))
                 else:
                     mrz_crops.append((item.item_id, crop))
             except (cv2.error, TypeError, ValueError) as error:
+                logger.warning("MRZ crop preparation failed for %s", item.item_id, exc_info=True)
                 errors[item.item_id] = error
         mrz_crop_seconds = time.perf_counter() - mrz_crop_started
 
@@ -830,6 +997,20 @@ class ProfileBatchRunner:
             "retry_split_count": 0,
             "isolated_failure_count": 0,
         }
+        if self.mrz_recognizer is None:
+            recognizer = self.ocr.recognizer
+            effective_model = getattr(recognizer, "model_name", None)
+            if effective_model is None:
+                effective_model = getattr(getattr(recognizer, "model", None), "_model_name", None)
+            if effective_model is None:
+                effective_model = getattr(getattr(recognizer, "worker", None), "model_name", None)
+            mrz_diagnostics.update({
+                "configured_model": self.mrz_recognizer_config,
+                "configured_model_used": False,
+                "effective_backend": "paddle",
+                "effective_model": effective_model,
+                "source": "text_recognition",
+            })
         mrz_results: dict[str, MrzRecognitionResult] = {}
         mrz_errors: dict[str, Exception] = {}
         mrz_started = time.perf_counter()
@@ -848,6 +1029,7 @@ class ProfileBatchRunner:
         for sample_id, error in ocr_result.errors.items():
             errors[sample_id.split(":", 1)[1]] = error
         result_assembly_started = time.perf_counter()
+        parse_validation_seconds = 0.0
         for item in items:
             if item.item_id in errors:
                 outcomes_by_id[item.item_id] = ProfileBatchOutcome(item.item_id, error=errors[item.item_id])
@@ -860,6 +1042,10 @@ class ProfileBatchRunner:
                     item.validate_fields,
                     min_overlap=item.min_overlap,
                     ocr_seconds=None,
+                )
+                parse_validation_seconds += sum(
+                    float(result[1]["timings"].get(name, 0.0))
+                    for name in ("field_assignment_seconds", "field_parsing_seconds", "validation_seconds")
                 )
                 mrz_text = None
                 sample_id = f"mrz:{item.item_id}"
@@ -878,6 +1064,7 @@ class ProfileBatchRunner:
                         })
                 result[1]["timings"]["total_seconds"] = time.perf_counter() - started_total
             except (cv2.error, IndexError, KeyError, TypeError, ValueError) as error:
+                logger.warning("profile result assembly failed for %s", item.item_id, exc_info=True)
                 outcomes_by_id[item.item_id] = ProfileBatchOutcome(item.item_id, error=error)
             else:
                 outcomes_by_id[item.item_id] = ProfileBatchOutcome(
@@ -908,10 +1095,24 @@ class ProfileBatchRunner:
                 "canonicalization_seconds": sum(value.timings.get("canonicalization_seconds", 0.0) for value in prepared.values()),
                 "data_crop_seconds": sum(value.timings.get("data_crop_seconds", 0.0) for value in prepared.values()),
                 "mrz_crop_preprocess_seconds": mrz_crop_seconds,
+                "parsing_validation_seconds": parse_validation_seconds,
                 "result_assembly_seconds": result_assembly_seconds,
             },
             **ocr_result.diagnostics,
             "mrz_recognition": mrz_diagnostics,
             "mrz_output_signatures": mrz_output_signatures,
         }
+        if mrz_crop_trace:
+            line_records = {}
+            for call in ocr_result.diagnostics.get("text_recognition", {}).get("calls", []):
+                for record in call.get("crop_records", []):
+                    if record.get("role") == "mrz":
+                        line_records.setdefault(record["sample_id"], []).append(record)
+            for record in mrz_crop_trace:
+                sample_id = f"mrz:{record['item_id']}"
+                record["line_crops"] = sorted(
+                    line_records.get(sample_id, []), key=lambda value: value.get("line_index", 0)
+                )
+                record["line_crop_count"] = len(record["line_crops"])
+            diagnostics["mrz_crop_trace"] = mrz_crop_trace
         return [outcomes_by_id[item.item_id] for item in items], diagnostics

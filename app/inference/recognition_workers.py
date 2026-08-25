@@ -12,12 +12,12 @@ import numpy as np
 _recognizer: Any | None = None
 
 
-def _init_recognizer(model_dir: str | None, cpu_threads: int) -> None:
+def _init_recognizer(model_name: str, model_dir: str | None, cpu_threads: int) -> None:
     global _recognizer
     from paddleocr import TextRecognition
 
     _recognizer = TextRecognition(
-        model_name="PP-OCRv6_medium_rec",
+        model_name=model_name,
         model_dir=model_dir,
         device="cpu",
         cpu_threads=cpu_threads,
@@ -47,7 +47,8 @@ def _ready() -> int:
 class ProcessTextRecognizer:
     """One Paddle model per spawned process; never share a predictor between threads."""
 
-    def __init__(self, *, model_dir: str | None, processes: int, cpu_threads: int):
+    def __init__(self, *, model_name: str, model_dir: str | None, processes: int, cpu_threads: int):
+        self.model_name = model_name
         self.model_dir = model_dir
         self.processes = processes
         self.cpu_threads = max(1, cpu_threads // processes)
@@ -59,7 +60,7 @@ class ProcessTextRecognizer:
                 max_workers=self.processes,
                 mp_context=multiprocessing.get_context("spawn"),
                 initializer=_init_recognizer,
-                initargs=(self.model_dir, self.cpu_threads),
+                initargs=(self.model_name, self.model_dir, self.cpu_threads),
             )
         return self._executor
 

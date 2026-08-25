@@ -17,7 +17,7 @@ class ModelProvisioningTests(unittest.TestCase):
                 [path.relative_to(root).as_posix() for path in expected],
                 [
                     "official_models/PP-OCRv6_medium_det",
-                    "official_models/PP-OCRv6_medium_rec",
+                    "official_models/latin_PP-OCRv5_mobile_rec",
                 ],
             )
             with self.assertRaisesRegex(FileNotFoundError, "missing prepared model directories"):

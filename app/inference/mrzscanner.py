@@ -49,3 +49,29 @@ class MrzScannerRecognizer:
             lines = tuple(line for line in text.split(self.inference.delimeter) if line)
             results.append(MrzRecognitionResult(lines, "recognized" if lines else "not_found"))
         return results
+
+
+class MrzScannerSpottingRecognizer:
+    """Use the pinned spotting graph on the already localized MRZ crop."""
+
+    supports_batch = False
+
+    def __init__(self, scanner: Any):
+        self.scanner = scanner
+        self.engine = scanner.scanner.model
+
+    @property
+    def providers(self) -> list[str]:
+        return list(self.engine.providers)
+
+    def recognize_batch(self, images: Sequence[np.ndarray]) -> list[MrzRecognitionResult]:
+        started = time.perf_counter()
+        values = [self.scanner.scanner(image) for image in images]
+        self.last_model_seconds = time.perf_counter() - started
+        self.last_tensor_batch_size = 1 if values else 0
+        self.last_tensor_batch_sizes = [1] * len(values)
+        results = []
+        for value in values:
+            lines = tuple(line for line in value if line)
+            results.append(MrzRecognitionResult(lines, "recognized" if lines else "not_found"))
+        return results

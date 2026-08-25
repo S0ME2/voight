@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 from typing import Any, Callable
 
@@ -28,6 +29,7 @@ from app.documents.profiles import load_document_profile
 from app.pipeline import RegionProfile, extract_profile
 
 Token = dict[str, Any]
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -77,6 +79,14 @@ def id_card_batch_pipeline() -> IdentityBatchPipeline:
             "date_of_expiry": "date_of_expiry",
         },
     )
+
+
+def identity_batch_pipeline(document_type: DocumentType) -> IdentityBatchPipeline:
+    if document_type == DocumentType.PASSPORT:
+        return passport_batch_pipeline()
+    if document_type == DocumentType.ID_CARD:
+        return id_card_batch_pipeline()
+    raise ValueError(f"unsupported identity document type: {document_type}")
 
 
 class DocumentPipelineError(Exception):
@@ -142,6 +152,7 @@ def _extract_region(
     except DocumentPipelineError:
         raise
     except (cv2.error, IndexError, KeyError, TypeError, ValueError) as error:
+        logger.warning("identity region extraction failed for %s", region, exc_info=True)
         raise DocumentPipelineError(
             ErrorCode.INVALID_DOCUMENT, f"{region} image could not be localized"
         ) from error
@@ -170,9 +181,8 @@ def _mrz(read_mrz: Callable[[np.ndarray], str], image: np.ndarray, document_type
     try:
         return parse_mrz(read_mrz(image) or "", document_type)
     except (cv2.error, IndexError, KeyError, TypeError, ValueError):
+        logger.warning("MRZ parsing failed; returning an empty MRZ result", exc_info=True)
         return parse_mrz("", document_type)
-
-
 def _date_key(visible: str) -> str:
     digits = re.sub(r"\D", "", visible)
     return digits[6:8] + digits[2:4] + digits[0:2] if len(digits) == 8 else digits
@@ -239,6 +249,14 @@ def _required_validation(profile: dict[str, Any], fields: dict[str, FieldResult]
         detail=f"missing: {', '.join(missing)}" if missing else None,
         fields=missing,
     )
+
+
+parse_visible = _parse_visible
+required_warnings = _required_warnings
+field_results = _field_results
+reconcile = _reconcile
+document_confidence = _document_confidence
+required_validation = _required_validation
 
 
 def extract_passport(

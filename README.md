@@ -22,8 +22,8 @@ make docker-cpu-up-d
 curl --fail http://127.0.0.1:8000/v1/health/ready
 ```
 
-The build downloads the pinned Paddle models into the image. It does not read
-or mount `~/.paddlex` from the host. Stop the service with:
+The build prepares the pinned Paddle model assets inside the image. It does not
+read or mount `~/.paddlex` from the host. Stop the service with:
 
 ```bash
 make docker-cpu-down
@@ -58,12 +58,12 @@ directories; private local datasets belong in ignored `dataset/`.
 ```text
 app/               production API, document pipelines, and inference adapters
 config/            versioned document profiles and ROI configuration
-scripts/           dataset, benchmark, validation, model, and experiment tools
-complexity/        maintained end-to-end API batch benchmark
+scripts/           dataset, validation, and model tools
+benchmarks/        maintained and historical benchmark tooling
+archive/           preserved early exploration prototypes
 tests/             CPU-safe unit, contract, batching, and integration tests
 annotation_input/  authorized committed profile-validation fixtures
 annotations/       authorized committed annotation state and truth
-assets/            committed experiment fixtures/templates
 docs/              architecture and operating documentation
 dataset/           ignored local sensitive data
 logs/, outputs/    ignored generated artifacts
@@ -78,8 +78,10 @@ logs/, outputs/    ignored generated artifacts
 - [CPU/GPU deployment](docs/deployment.md)
 - [Development](docs/development.md)
 - [Benchmarking](docs/benchmarking.md)
+- [GPU benchmark suite](benchmarks/gpu/README.md)
 - [Datasets and annotation](docs/dataset.md)
 - [Legacy API migration](docs/migration.md)
 
-GPU manifests are provided for the Tesla V100 server, but GPU inference has not
-been validated yet. Do not run GPU targets on a CPU development machine.
+GPU manifests and the staged benchmark suite are provided for the Tesla V100
+server, but GPU inference has not been validated yet. Do not run GPU targets or
+the benchmark executor on a CPU development machine.

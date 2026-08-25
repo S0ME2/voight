@@ -2,7 +2,7 @@
 
 Identity documents contain sensitive personal information. Use only data you
 are authorized to possess and process. The repository's committed
-`annotation_input/`, `annotations/`, and `assets/` material is authorized
+`annotation_input/` and `annotations/` material is authorized
 anonymized or openly sourced fixture data. New local data belongs in ignored
 `dataset/` and must not be committed by default.
 
@@ -30,6 +30,7 @@ The guided OpenCV annotator maintains production crop/ROI geometry:
 uv run --no-sync python scripts/dataset/annotate_profiles.py annotation_input annotations
 uv run --no-sync python scripts/dataset/annotate_profiles.py annotation_input annotations --check
 uv run --no-sync python scripts/dataset/promote_profiles.py
+uv run --no-sync python scripts/dataset/promote_profiles.py --check
 ```
 
 `annotations/annotation_state.json` is the source of truth for the supplied

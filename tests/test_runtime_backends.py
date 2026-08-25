@@ -85,6 +85,7 @@ class RuntimeBackendTests(unittest.TestCase):
         self.assertEqual(7, created[0]["session_option"]["intra_op_num_threads"])
         self.assertEqual("CUDA", created[1]["backend"])
         self.assertEqual("gpu:3", created[2]["device"])
+        self.assertEqual(7, created[2]["cpu_threads"])
 
 
 if __name__ == "__main__":

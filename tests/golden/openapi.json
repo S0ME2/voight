@@ -1,0 +1,931 @@
+{
+  "components": {
+    "schemas": {
+      "BatchItemResult": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "index": {
+            "minimum": 0.0,
+            "title": "Index",
+            "type": "integer"
+          },
+          "input": {
+            "$ref": "#/components/schemas/DocumentInput"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "index",
+          "input",
+          "success"
+        ],
+        "title": "BatchItemResult",
+        "type": "object"
+      },
+      "Body_driving_license_batch_v1_ocr_driving_license_batch_post": {
+        "properties": {
+          "archive": {
+            "anyOf": [
+              {
+                "contentMediaType": "application/octet-stream",
+                "format": "binary",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive"
+          },
+          "images": {
+            "default": [],
+            "description": "Select one or more image files, ZIP archives, or a mixture of both. ZIP archives may contain images in nested folders.",
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "format": "binary",
+              "type": "string"
+            },
+            "title": "Images",
+            "type": "array"
+          }
+        },
+        "title": "Body_driving_license_batch_v1_ocr_driving_license_batch_post",
+        "type": "object"
+      },
+      "Body_driving_license_v1_ocr_driving_license_post": {
+        "properties": {
+          "image": {
+            "contentMediaType": "application/octet-stream",
+            "title": "Image",
+            "type": "string"
+          }
+        },
+        "required": [
+          "image"
+        ],
+        "title": "Body_driving_license_v1_ocr_driving_license_post",
+        "type": "object"
+      },
+      "Body_id_card_batch_v1_ocr_id_card_batch_post": {
+        "properties": {
+          "archive": {
+            "contentMediaType": "application/octet-stream",
+            "title": "Archive",
+            "type": "string"
+          }
+        },
+        "required": [
+          "archive"
+        ],
+        "title": "Body_id_card_batch_v1_ocr_id_card_batch_post",
+        "type": "object"
+      },
+      "Body_id_card_v1_ocr_id_card_post": {
+        "properties": {
+          "back": {
+            "contentMediaType": "application/octet-stream",
+            "title": "Back",
+            "type": "string"
+          },
+          "front": {
+            "contentMediaType": "application/octet-stream",
+            "title": "Front",
+            "type": "string"
+          }
+        },
+        "required": [
+          "front",
+          "back"
+        ],
+        "title": "Body_id_card_v1_ocr_id_card_post",
+        "type": "object"
+      },
+      "Body_passport_batch_v1_ocr_passport_batch_post": {
+        "properties": {
+          "archive": {
+            "anyOf": [
+              {
+                "contentMediaType": "application/octet-stream",
+                "format": "binary",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive"
+          },
+          "images": {
+            "default": [],
+            "description": "Select one or more image files, ZIP archives, or a mixture of both. ZIP archives may contain images in nested folders.",
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "format": "binary",
+              "type": "string"
+            },
+            "title": "Images",
+            "type": "array"
+          }
+        },
+        "title": "Body_passport_batch_v1_ocr_passport_batch_post",
+        "type": "object"
+      },
+      "Body_passport_v1_ocr_passport_post": {
+        "properties": {
+          "image": {
+            "contentMediaType": "application/octet-stream",
+            "title": "Image",
+            "type": "string"
+          }
+        },
+        "required": [
+          "image"
+        ],
+        "title": "Body_passport_v1_ocr_passport_post",
+        "type": "object"
+      },
+      "BoundingBox": {
+        "properties": {
+          "x1": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "X1",
+            "type": "number"
+          },
+          "x2": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "X2",
+            "type": "number"
+          },
+          "y1": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Y1",
+            "type": "number"
+          },
+          "y2": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Y2",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x1",
+          "y1",
+          "x2",
+          "y2"
+        ],
+        "title": "BoundingBox",
+        "type": "object"
+      },
+      "Confidence": {
+        "properties": {
+          "calibrated_probability": {
+            "default": false,
+            "title": "Calibrated Probability",
+            "type": "boolean"
+          },
+          "score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Score",
+            "type": "number"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ConfidenceSource"
+          }
+        },
+        "required": [
+          "score",
+          "source"
+        ],
+        "title": "Confidence",
+        "type": "object"
+      },
+      "ConfidenceSource": {
+        "enum": [
+          "document_detection",
+          "ocr_token",
+          "ocr_token_mean",
+          "ocr_token_minimum"
+        ],
+        "title": "ConfidenceSource",
+        "type": "string"
+      },
+      "DocumentInput": {
+        "description": "Logical upload names; the HTTP transport supplies the corresponding files.",
+        "properties": {
+          "back": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Back"
+          },
+          "document_type": {
+            "$ref": "#/components/schemas/DocumentType"
+          },
+          "front": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Front"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          }
+        },
+        "required": [
+          "document_type"
+        ],
+        "title": "DocumentInput",
+        "type": "object"
+      },
+      "DocumentResult": {
+        "properties": {
+          "document_confidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Confidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "document_type": {
+            "$ref": "#/components/schemas/DocumentType"
+          },
+          "fields": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FieldResult"
+            },
+            "title": "Fields",
+            "type": "object"
+          },
+          "layout": {
+            "title": "Layout",
+            "type": "string"
+          },
+          "mrz": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MrzResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timings": {
+            "$ref": "#/components/schemas/TimingResult"
+          },
+          "validations": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationResult"
+            },
+            "title": "Validations",
+            "type": "array"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "document_type",
+          "layout",
+          "fields",
+          "timings"
+        ],
+        "title": "DocumentResult",
+        "type": "object"
+      },
+      "DocumentType": {
+        "enum": [
+          "passport",
+          "id_card",
+          "driving_license"
+        ],
+        "title": "DocumentType",
+        "type": "string"
+      },
+      "ErrorCode": {
+        "enum": [
+          "invalid_upload",
+          "unsupported_media_type",
+          "upload_too_large",
+          "too_many_items",
+          "invalid_archive",
+          "missing_document_side",
+          "invalid_document",
+          "profile_unavailable",
+          "model_unavailable",
+          "queue_full",
+          "resource_exhausted",
+          "processing_failed"
+        ],
+        "title": "ErrorCode",
+        "type": "string"
+      },
+      "ErrorResult": {
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail"
+        ],
+        "title": "ErrorResult",
+        "type": "object"
+      },
+      "FieldResult": {
+        "properties": {
+          "bounding_box": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BoundingBox"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Confidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "raw_text": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Raw Text",
+            "type": "array"
+          },
+          "region": {
+            "title": "Region",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "value",
+          "region"
+        ],
+        "title": "FieldResult",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "MrzResult": {
+        "properties": {
+          "fields": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Fields",
+            "type": "object"
+          },
+          "raw_lines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Raw Lines",
+            "type": "array"
+          },
+          "validations": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationResult"
+            },
+            "title": "Validations",
+            "type": "array"
+          }
+        },
+        "title": "MrzResult",
+        "type": "object"
+      },
+      "OcrBatchResponse": {
+        "properties": {
+          "diagnostics": {
+            "additionalProperties": true,
+            "title": "Diagnostics",
+            "type": "object"
+          },
+          "failed": {
+            "minimum": 0.0,
+            "title": "Failed",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BatchItemResult"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "succeeded": {
+            "minimum": 0.0,
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_seconds": {
+            "minimum": 0.0,
+            "title": "Total Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "total",
+          "succeeded",
+          "failed",
+          "total_seconds",
+          "items"
+        ],
+        "title": "OcrBatchResponse",
+        "type": "object"
+      },
+      "OcrResponse": {
+        "properties": {
+          "result": {
+            "$ref": "#/components/schemas/DocumentResult"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "title": "OcrResponse",
+        "type": "object"
+      },
+      "TimingResult": {
+        "properties": {
+          "stages": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Stages",
+            "type": "object"
+          },
+          "total_seconds": {
+            "minimum": 0.0,
+            "title": "Total Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "total_seconds"
+        ],
+        "title": "TimingResult",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "ValidationResult": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ValidationStatus"
+          }
+        },
+        "required": [
+          "code",
+          "status"
+        ],
+        "title": "ValidationResult",
+        "type": "object"
+      },
+      "ValidationStatus": {
+        "enum": [
+          "passed",
+          "failed",
+          "warning",
+          "not_run"
+        ],
+        "title": "ValidationStatus",
+        "type": "string"
+      }
+    }
+  },
+  "info": {
+    "title": "VoightKampff OCR API",
+    "version": "0.3.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/health/live": {
+      "get": {
+        "operationId": "live_v1_health_live_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Live V1 Health Live Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Live"
+      }
+    },
+    "/v1/health/ready": {
+      "get": {
+        "operationId": "ready_v1_health_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ready V1 Health Ready Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ready"
+      }
+    },
+    "/v1/ocr/driving-license": {
+      "post": {
+        "operationId": "driving_license_v1_ocr_driving_license_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_driving_license_v1_ocr_driving_license_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OcrResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Driving License"
+      }
+    },
+    "/v1/ocr/driving-license/batch": {
+      "post": {
+        "operationId": "driving_license_batch_v1_ocr_driving_license_batch_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_driving_license_batch_v1_ocr_driving_license_batch_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OcrBatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Driving License Batch"
+      }
+    },
+    "/v1/ocr/id-card": {
+      "post": {
+        "operationId": "id_card_v1_ocr_id_card_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_id_card_v1_ocr_id_card_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OcrResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Id Card"
+      }
+    },
+    "/v1/ocr/id-card/batch": {
+      "post": {
+        "operationId": "id_card_batch_v1_ocr_id_card_batch_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_id_card_batch_v1_ocr_id_card_batch_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OcrBatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Id Card Batch"
+      }
+    },
+    "/v1/ocr/passport": {
+      "post": {
+        "operationId": "passport_v1_ocr_passport_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_passport_v1_ocr_passport_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OcrResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Passport"
+      }
+    },
+    "/v1/ocr/passport/batch": {
+      "post": {
+        "operationId": "passport_batch_v1_ocr_passport_batch_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_passport_batch_v1_ocr_passport_batch_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OcrBatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Passport Batch"
+      }
+    }
+  }
+}

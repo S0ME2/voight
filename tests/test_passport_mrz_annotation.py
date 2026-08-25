@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 
 from app.documents.passport_localization import detect_passport_page_padded, page_corners_from_mrz, page_corners_from_mrz_width, relative_to_mrz_width
-from scripts.experiments.mrz.annotate_passport_mrz import relative_to_mrz
+from scripts.dataset.annotate_passport_mrz import relative_to_mrz
 
 
 class PassportMrzAnnotationTests(unittest.TestCase):

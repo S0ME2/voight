@@ -27,6 +27,11 @@ def _optional_path(name: str) -> Path | None:
     return None if not value else _path(name, Path(value))
 
 
+def _optional_int(name: str) -> int | None:
+    value = os.getenv(name)
+    return None if not value else int(value)
+
+
 @dataclass(frozen=True)
 class ArtifactSettings:
     enabled: bool
@@ -55,6 +60,7 @@ class DrivingLicenseSettings:
     aligner_padding: int
     min_overlap_ratio: float
     aligner_model: str
+    aligner_model_type: str = "heatmap"
 
 
 @dataclass(frozen=True)
@@ -70,15 +76,20 @@ class RuntimeSettings:
     cpu_threads: int = 4
     queue_limit: int = 32
     localization_batch_size: int = 4
-    text_detection_batch_size: int = 8
-    text_recognition_batch_size: int = 32
+    text_detection_batch_size: int = 1
+    text_recognition_batch_size: int = 2
     text_recognition_processes: int = 1
     gpu_id: int = 0
     text_recognition_enable_hpi: bool = False
     text_recognition_use_tensorrt: bool = False
     text_recognition_precision: str = "fp32"
-    mrz_recognition_batch_size: int = 16
-    text_recognition_packing: str = "aspect-ratio"
+    mrz_recognition_batch_size: int = 2
+    text_recognition_packing: str = "fixed-width"
+    text_detector_pixel_scale: float = 1.0
+    text_detector_limit_side_len: int | None = None
+    text_detector_preprocessing: str = "original"
+    visible_recognition_preprocessing: str = "original"
+    mrz_preprocessing: str = "contrast_1.50"
 
 
 @dataclass(frozen=True)
@@ -108,7 +119,7 @@ class ModelSettings:
         default_factory=lambda: TextModelSettings("paddle", "PP-OCRv6_medium_det")
     )
     text_recognizer: TextModelSettings = field(
-        default_factory=lambda: TextModelSettings("paddle", "PP-OCRv6_medium_rec")
+        default_factory=lambda: TextModelSettings("paddle", "latin_PP-OCRv5_mobile_rec")
     )
     localization: LocalizationModelSettings = field(default_factory=LocalizationModelSettings)
     mrz: MrzModelSettings = field(default_factory=MrzModelSettings)
@@ -145,14 +156,24 @@ class Settings:
             raise ValueError("TEXT_RECOGNITION_PROCESSES may exceed one only on CPU")
         if self.runtime.text_recognition_precision not in {"fp32", "fp16"}:
             raise ValueError("TEXT_RECOGNITION_PRECISION must be 'fp32' or 'fp16'")
-        if self.runtime.text_recognition_packing not in {"sequential", "aspect-ratio"}:
-            raise ValueError("TEXT_RECOGNITION_PACKING must be 'sequential' or 'aspect-ratio'")
+        if self.runtime.text_recognition_packing not in {"sequential", "aspect-ratio", "fixed-width", "fixed-width-buckets", "best-fit"}:
+            raise ValueError("TEXT_RECOGNITION_PACKING must be 'sequential', 'aspect-ratio', 'fixed-width', 'fixed-width-buckets', or 'best-fit'")
+        if self.driving_license.aligner_model_type not in {"heatmap", "point"}:
+            raise ValueError("DOCALIGNER_MODEL_TYPE must be 'heatmap' or 'point'")
         if self.runtime.target == "cpu" and (
             self.runtime.text_recognition_enable_hpi
             or self.runtime.text_recognition_use_tensorrt
             or self.runtime.text_recognition_precision != "fp32"
         ):
             raise ValueError("text-recognition HPI, TensorRT, and FP16 require RUNTIME_TARGET=gpu")
+        preprocessing = {"original", "grayscale", "contrast_1.15", "contrast_1.25", "contrast_1.30", "contrast_1.50", "clahe_mild", "clahe_medium", "gamma_0.8", "gamma_1.2", "sharpen_light", "otsu", "adaptive"}
+        for name, value in {
+            "TEXT_DETECTOR_PREPROCESSING": self.runtime.text_detector_preprocessing,
+            "VISIBLE_RECOGNITION_PREPROCESSING": self.runtime.visible_recognition_preprocessing,
+            "MRZ_PREPROCESSING": self.runtime.mrz_preprocessing,
+        }.items():
+            if value not in preprocessing:
+                raise ValueError(f"{name} is not supported: {value}")
 
         positive = {
             "CPU_THREADS": self.runtime.cpu_threads,
@@ -162,6 +183,7 @@ class Settings:
             "TEXT_RECOGNITION_BATCH_SIZE": self.runtime.text_recognition_batch_size,
             "MRZ_RECOGNITION_BATCH_SIZE": self.runtime.mrz_recognition_batch_size,
             "TEXT_RECOGNITION_PROCESSES": self.runtime.text_recognition_processes,
+            "TEXT_DETECTOR_PIXEL_SCALE": self.runtime.text_detector_pixel_scale,
             "BATCH_MAX_FILES": self.batch.max_files,
             "BATCH_MAX_FILE_BYTES": self.batch.max_file_bytes,
             "BATCH_MAX_ARCHIVE_UNCOMPRESSED_BYTES": self.batch.max_archive_uncompressed_bytes,
@@ -169,6 +191,8 @@ class Settings:
         for name, value in positive.items():
             if value <= 0:
                 raise ValueError(f"{name} must be greater than zero")
+        if self.runtime.text_detector_limit_side_len is not None and self.runtime.text_detector_limit_side_len <= 0:
+            raise ValueError("TEXT_DETECTOR_LIMIT_SIDE_LEN must be greater than zero")
         if self.batch.max_archive_uncompressed_bytes < self.batch.max_file_bytes:
             raise ValueError(
                 "BATCH_MAX_ARCHIVE_UNCOMPRESSED_BYTES must be at least BATCH_MAX_FILE_BYTES"
@@ -211,7 +235,7 @@ class Settings:
             mrz=MrzSettings(
                 os.getenv("MRZSCANNER_DETECTION_CFG", "20250222"),
                 int(os.getenv("OCR_MAX_SIDE", "3000")),
-                float(os.getenv("OCR_CONTRAST", "1.25")),
+                float(os.getenv("OCR_CONTRAST", "1.50")),
                 float(os.getenv("MRZ_POLYGON_PADDING_RATIO", "0.03")),
             ),
             driving_license=DrivingLicenseSettings(
@@ -228,6 +252,7 @@ class Settings:
                 int(os.getenv("DOCALIGNER_PADDING", "100")),
                 float(os.getenv("DRIVING_LICENSE_MIN_OVERLAP_RATIO", "0.30")),
                 os.getenv("DOCALIGNER_MODEL", "fastvit_sa24"),
+                os.getenv("DOCALIGNER_MODEL_TYPE", "heatmap").strip().lower(),
             ),
             batch=BatchSettings(
                 max_files=_positive_int("BATCH_MAX_FILES", 20),
@@ -243,12 +268,12 @@ class Settings:
                 cpu_threads=_positive_int("CPU_THREADS", 4),
                 queue_limit=_positive_int("REQUEST_QUEUE_LIMIT", 32),
                 localization_batch_size=_positive_int("LOCALIZATION_BATCH_SIZE", 4),
-                text_detection_batch_size=_positive_int("TEXT_DETECTION_BATCH_SIZE", 8),
+                text_detection_batch_size=_positive_int("TEXT_DETECTION_BATCH_SIZE", 1),
                 text_recognition_batch_size=_positive_int(
-                    "TEXT_RECOGNITION_BATCH_SIZE", 32
+                    "TEXT_RECOGNITION_BATCH_SIZE", 2
                 ),
                 mrz_recognition_batch_size=_positive_int(
-                    "MRZ_RECOGNITION_BATCH_SIZE", 16
+                    "MRZ_RECOGNITION_BATCH_SIZE", 2
                 ),
                 text_recognition_processes=_positive_int(
                     "TEXT_RECOGNITION_PROCESSES", 1
@@ -257,7 +282,12 @@ class Settings:
                 text_recognition_enable_hpi=_bool("TEXT_RECOGNITION_ENABLE_HPI", False),
                 text_recognition_use_tensorrt=_bool("TEXT_RECOGNITION_USE_TENSORRT", False),
                 text_recognition_precision=os.getenv("TEXT_RECOGNITION_PRECISION", "fp32").strip().lower(),
-                text_recognition_packing=os.getenv("TEXT_RECOGNITION_PACKING", "aspect-ratio").strip().lower(),
+                text_recognition_packing=os.getenv("TEXT_RECOGNITION_PACKING", "fixed-width").strip().lower(),
+                text_detector_pixel_scale=float(os.getenv("TEXT_DETECTOR_PIXEL_SCALE", "1")),
+                text_detector_limit_side_len=_optional_int("TEXT_DETECTOR_LIMIT_SIDE_LEN"),
+                text_detector_preprocessing=os.getenv("TEXT_DETECTOR_PREPROCESSING", "original").strip().lower(),
+                visible_recognition_preprocessing=os.getenv("VISIBLE_RECOGNITION_PREPROCESSING", "original").strip().lower(),
+                mrz_preprocessing=os.getenv("MRZ_PREPROCESSING", "contrast_1.50").strip().lower(),
             ),
             models=ModelSettings(
                 _optional_path("MODEL_DIR"),
@@ -267,7 +297,7 @@ class Settings:
                 ),
                 TextModelSettings(
                     os.getenv("TEXT_RECOGNIZER_BACKEND", "paddle").strip().lower(),
-                    os.getenv("TEXT_RECOGNIZER_MODEL", "PP-OCRv6_medium_rec").strip(),
+                    os.getenv("TEXT_RECOGNIZER_MODEL", "latin_PP-OCRv5_mobile_rec").strip(),
                 ),
                 LocalizationModelSettings(
                     os.getenv("DOCUMENT_LOCALIZER_BACKEND", "docaligner").strip().lower(),

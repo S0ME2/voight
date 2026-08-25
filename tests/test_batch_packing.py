@@ -4,7 +4,7 @@ import numpy as np
 
 from app.inference.batch import BatchedOcr, OcrSample, _pad_detection_batch
 from app.inference.contracts import DetectedTextRegion, DetectedTextRegions, RecognitionResult
-from app.inference.packing import AspectRatioBatchPacker
+from app.inference.packing import AspectRatioBatchPacker, FixedWidthBatchPacker
 
 
 class BatchPackingTests(unittest.TestCase):
@@ -52,6 +52,15 @@ class BatchPackingTests(unittest.TestCase):
         ])
         self.assertEqual([(30, 40, 3), (30, 40, 3)], [image.shape for _, image in padded])
         self.assertEqual([0, 1], [index for index, _ in padded])
+
+    def test_fixed_width_keeps_crop_tensor_independent_of_batch_members(self):
+        packer = FixedWidthBatchPacker()
+        image = np.full((20, 60, 3), 80, np.uint8)
+        unrelated = np.full((20, 60, 3), 160, np.uint8)
+        solo = packer.pack([(0, image)], 1)[0][0][1]
+        pair = packer.pack([(0, image), (1, unrelated)], 2)[0]
+        self.assertEqual(solo.shape, pair[0][1].shape)
+        np.testing.assert_array_equal(solo, pair[0][1])
 
 
 if __name__ == "__main__":

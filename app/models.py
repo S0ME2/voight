@@ -1,3 +1,4 @@
+import os
 import time
 from collections.abc import Mapping
 from typing import Any, Callable
@@ -75,11 +76,12 @@ class Models:
                 model_name=selection.model,
                 model_dir=self._paddle_model_dir(selection.model),
                 device=self._paddle_device(),
+                cpu_threads=self.settings.runtime.cpu_threads,
                 thresh=OCR_PREDICT_CONFIG["text_det_thresh"],
                 box_thresh=OCR_PREDICT_CONFIG["text_det_box_thresh"],
                 unclip_ratio=OCR_PREDICT_CONFIG["text_det_unclip_ratio"],
             )
-            return PaddleTextDetector(TextDetection(**options))
+            return PaddleTextDetector(TextDetection(**options), self.settings.runtime)
 
         return self._get_or_load("_text_detector", "text_detector", load)
 
@@ -123,6 +125,7 @@ class Models:
                 raise ValueError("TEXT_RECOGNITION_PROCESSES requires the paddle backend")
             self._process_text_recognizer = ProcessTextRecognizerAdapter(
                 ProcessTextRecognizer(
+                    model_name=selection.model,
                     model_dir=self._paddle_model_dir(selection.model),
                     processes=runtime.text_recognition_processes,
                     cpu_threads=runtime.cpu_threads,
@@ -145,7 +148,12 @@ class Models:
                     else self.text_recognizer(),
                     detection_batch_size=runtime.text_detection_batch_size,
                     recognition_batch_size=runtime.text_recognition_batch_size,
+                    mrz_recognition_batch_size=runtime.mrz_recognition_batch_size,
                     recognition_packer=recognition_batch_packer(runtime.text_recognition_packing),
+                    mrz_contrast=self.settings.mrz.contrast,
+                    detector_preprocessing=runtime.text_detector_preprocessing,
+                    visible_preprocessing=runtime.visible_recognition_preprocessing,
+                    mrz_preprocessing=runtime.mrz_preprocessing,
                 ),
                 {
                     "docaligner": self.document_localizer(),
@@ -155,15 +163,19 @@ class Models:
                 localization_batch_size=runtime.localization_batch_size,
                 mrz_recognizer=self.mrz_recognizer(),
                 mrz_recognition_batch_size=runtime.mrz_recognition_batch_size,
+                mrz_recognizer_config=self.settings.models.mrz.recognizer_model,
                 max_items=self.settings.batch.max_files * 2,
             )
         return self._profile_batch_runner
 
     def document_aligner(self) -> Any:
         def load() -> Any:
-            from docaligner import DocAligner
+            import docaligner
 
-            return DocAligner(
+            model_type = self.settings.driving_license.aligner_model_type
+            types = getattr(docaligner, "ModelType", None)
+            return docaligner.DocAligner(
+                model_type=getattr(types, model_type) if types else model_type,
                 model_cfg=self.settings.driving_license.aligner_model,
                 backend=self._onnx_backend(),
                 gpu_id=self.settings.runtime.gpu_id,
@@ -187,13 +199,23 @@ class Models:
         backend = self.settings.models.mrz.recognizer_backend
         if backend == "generic-paddle":
             return None
-        if backend != "mrzscanner":
+        if backend not in {"mrzscanner", "mrzscanner-spotting"}:
             raise ValueError(f"unknown MRZ recognizer backend: {backend}")
 
         def load() -> Any:
             from mrzscanner import MRZScanner, ModelType
-            from app.inference.mrzscanner import MrzScannerRecognizer
+            from app.inference.mrzscanner import MrzScannerRecognizer, MrzScannerSpottingRecognizer
 
+            if backend == "mrzscanner-spotting":
+                scanner = MRZScanner(
+                    model_type=ModelType.spotting,
+                    spotting_cfg=self.settings.models.mrz.recognizer_model,
+                    backend=self._onnx_backend(),
+                    gpu_id=self.settings.runtime.gpu_id,
+                    session_option=self._onnx_session_options(),
+                )
+                self._mrz_recognition_scanner = scanner
+                return MrzScannerSpottingRecognizer(scanner)
             scanner = MRZScanner(
                 model_type=ModelType.recognition,
                 recognition_cfg=self.settings.models.mrz.recognizer_model,
@@ -208,12 +230,13 @@ class Models:
 
     def document_localizer(self) -> Any:
         def load() -> Any:
-            from app.inference.localization import DocAlignerBatchLocalizer
+            from app.inference.localization import DocAlignerBatchLocalizer, PointDocAlignerLocalizer
 
             backend = self.settings.models.localization.document_backend
             if backend != "docaligner":
                 raise ValueError(f"unknown document localizer backend: {backend}")
-            return DocAlignerBatchLocalizer(self.document_aligner())
+            aligner = self.document_aligner()
+            return PointDocAlignerLocalizer(aligner) if self.settings.driving_license.aligner_model_type == "point" else DocAlignerBatchLocalizer(aligner)
 
         return self._get_or_load("_document_localizer", "document_localizer", load)
 
@@ -269,3 +292,71 @@ class Models:
             self.settings,
             localizers=tuple(runner.localizers.values()),
         )
+
+    def configuration(self) -> dict[str, Any]:
+        mrz_backend = self.settings.models.mrz.recognizer_backend
+        generic_mrz = mrz_backend == "generic-paddle"
+        detector_resize = self._text_detector.resize_configuration() if self._text_detector is not None else None
+        if detector_resize is None:
+            detector_resize = {
+                "effective_percent": round(self.settings.runtime.text_detector_pixel_scale ** 2 * 100, 2),
+                "pixel_scale": self.settings.runtime.text_detector_pixel_scale,
+                "limit_side_len_override": self.settings.runtime.text_detector_limit_side_len,
+                "preprocessing": "original",
+                "loaded": False,
+            }
+        try:
+            import cv2
+
+            opencv_threads = cv2.getNumThreads()
+        except ImportError:
+            opencv_threads = None
+        detector_threads = self.settings.runtime.cpu_threads
+        recognizer_threads = self.settings.runtime.cpu_threads
+        if self._text_detector is not None:
+            detector_threads = getattr(self._text_detector.model, "_common_args", {}).get("cpu_threads", detector_threads)
+        if self._text_recognizer is not None:
+            recognizer_threads = getattr(self._text_recognizer.model, "_common_args", {}).get("cpu_threads", recognizer_threads)
+        return {
+            "runtime": {
+                "target": self.settings.runtime.target,
+                "paddle_cpu_threads": self.settings.runtime.cpu_threads,
+                "onnx_intra_op_threads": self.settings.runtime.cpu_threads,
+                "onnx_inter_op_threads": 0,
+                "omp_num_threads": int(os.getenv("OMP_NUM_THREADS", "1")),
+                "opencv_threads": opencv_threads,
+            },
+            "batch": {
+                "localization": self.settings.runtime.localization_batch_size,
+                "detection": self.settings.runtime.text_detection_batch_size,
+                "recognition": self.settings.runtime.text_recognition_batch_size,
+                "mrz_recognition": self.settings.runtime.mrz_recognition_batch_size,
+            },
+            "recognition_packing": self.settings.runtime.text_recognition_packing,
+            "recognition_acceleration": {
+                "precision": self.settings.runtime.text_recognition_precision,
+                "hpi": self.settings.runtime.text_recognition_enable_hpi,
+                "tensorrt": self.settings.runtime.text_recognition_use_tensorrt,
+            },
+            "detector_preprocessing": self.settings.runtime.text_detector_preprocessing,
+            "visible_recognition_preprocessing": self.settings.runtime.visible_recognition_preprocessing,
+            "mrz_preprocessing": {
+                "normalization": "resize/grayscale only",
+                "line_contrast": self.settings.mrz.contrast,
+                "variant": self.settings.runtime.mrz_preprocessing,
+                "stage": "raw MRZ line crop before fixed-width packing",
+            },
+            "text_detector": {"backend": self.settings.models.text_detector.backend, "model": self.settings.models.text_detector.model, "path": self._paddle_model_dir(self.settings.models.text_detector.model), "cpu_threads": detector_threads, "loaded": self.is_loaded("text_detector"), "resize": detector_resize},
+            "text_recognizer": {"backend": self.settings.models.text_recognizer.backend, "model": self.settings.models.text_recognizer.model, "path": self._paddle_model_dir(self.settings.models.text_recognizer.model), "cpu_threads": recognizer_threads, "loaded": self.is_loaded("text_recognizer")},
+            "document_localizer": {"backend": self.settings.models.localization.document_backend, "model": self.settings.driving_license.aligner_model, "model_type": self.settings.driving_license.aligner_model_type, "model_cfg": self.settings.driving_license.aligner_model, "loaded": self.is_loaded("document_localizer")},
+            "mrz_localizer": {"backend": self.settings.models.localization.mrz_backend, "model_cfg": self.settings.mrz.scanner_config, "loaded": self.is_loaded("mrz_localizer")},
+            "mrz_recognizer": {
+                "backend": mrz_backend,
+                "model_cfg": self.settings.models.mrz.recognizer_model,
+                "model_cfg_used": not generic_mrz,
+                "effective_backend": self.settings.models.text_recognizer.backend if generic_mrz else mrz_backend,
+                "effective_model": self.settings.models.text_recognizer.model if generic_mrz else self.settings.models.mrz.recognizer_model,
+                "source": "text_recognizer" if generic_mrz else "mrzscanner",
+                "loaded": self.is_loaded("mrz_recognizer") or (generic_mrz and self.is_loaded("text_recognizer")),
+            },
+        }

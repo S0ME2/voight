@@ -3,7 +3,7 @@ FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOME=/home/voight PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True MODEL_DIR=/opt/voight/models
 WORKDIR /app
-RUN groupadd --system voight && useradd --system --gid voight --home-dir "$HOME" --create-home voight && mkdir -p /app/logs "$MODEL_DIR" && chown -R voight:voight /app/logs "$HOME" "$MODEL_DIR" && apt-get update && apt-get install --no-install-recommends -y libgl1 libglib2.0-0 libgomp1 libturbojpeg0 && rm -rf /var/lib/apt/lists/*
+RUN groupadd --system voight && useradd --system --gid voight --home-dir "$HOME" --create-home voight && mkdir -p /app/logs "$MODEL_DIR" && chown -R voight:voight /app/logs "$HOME" "$MODEL_DIR" && apt-get update && apt-get install --no-install-recommends -y git libgl1 libglib2.0-0 libgomp1 libturbojpeg0 && rm -rf /var/lib/apt/lists/*
 COPY requirements/ /app/requirements/
 
 FROM base AS cpu-deps
@@ -41,7 +41,14 @@ FROM cpu AS cpu-test
 USER root
 COPY scripts/ /app/scripts/
 COPY tests/ /app/tests/
-CMD ["python", "-m", "unittest", "tests/test_config.py", "tests/test_contracts.py", "tests/test_batched_inference.py", "tests/test_v1_api.py", "tests/test_model_provisioning.py", "-v"]
+COPY README.md .env.example /app/
+COPY docs/ /app/docs/
+COPY .git/ /app/.git/
+COPY annotation_input/ /app/annotation_input/
+COPY annotations/ /app/annotations/
+COPY benchmarks/ /app/benchmarks/
+COPY archive/ /app/archive/
+CMD ["python", "-m", "unittest", "discover", "-s", "tests", "-v"]
 
 FROM gpu-assets AS gpu
 COPY --chown=voight:voight app/ /app/app/

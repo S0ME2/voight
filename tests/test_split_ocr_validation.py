@@ -12,14 +12,14 @@ from app.inference.batch import BatchedOcr, ProfileBatchItem, ProfileBatchRunner
 from app.inference.contracts import DetectedTextRegion, DetectedTextRegions, RecognitionResult
 from app.inference.packing import SequentialBatchPacker
 from app.pipeline import RegionProfile
-from scripts.benchmarking.split_ocr_validation import (
+from benchmarks.maintained.split_ocr_validation import (
     MODES,
     comparison_modes,
     execution_equivalence,
     measurement_stats,
     output_equivalence,
 )
-from scripts.benchmarking.pipeline_breakdown import Document, Run
+from benchmarks.maintained.pipeline_breakdown import Document, Run
 
 
 class FakeLocalizer:

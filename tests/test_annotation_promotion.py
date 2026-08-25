@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from app.documents.profiles import load_document_profile
-from scripts.dataset.promote_profiles import promote
+from scripts.dataset.promote_profiles import check, promote
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,3 +28,19 @@ class AnnotationPromotionTests(unittest.TestCase):
             licence = state["samples"]["driving_license:test_license_canonical.jpg"]
             self.assertEqual(json.loads((destination.parent / "driving_license" / "data_crop.json").read_text())["data_crop"], licence["data_crop"])
             self.assertEqual(json.loads((destination.parent / "driving_license" / "field_rois_crop.json").read_text()), licence["fields"])
+
+    def test_check_is_quiet_when_in_sync_and_reports_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "documents"
+            (destination / "uz_passport").mkdir(parents=True)
+            (destination / "uz_id_card").mkdir()
+            for profile in ("uz_passport", "uz_id_card"):
+                source = ROOT / "config/documents" / profile / "profile.json"
+                (destination / profile / "profile.json").write_text(source.read_text(), encoding="utf-8")
+            promote(ROOT / "annotations/annotation_state.json", destination)
+            state = ROOT / "annotations/annotation_state.json"
+            self.assertEqual(check(state, destination), [])
+            licence_crop = destination.parent / "driving_license" / "data_crop.json"
+            licence_crop.write_text(licence_crop.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+            drift = check(state, destination)
+            self.assertEqual(drift, [(destination.parent / "driving_license" / "data_crop.json").as_posix()])
