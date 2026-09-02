@@ -78,6 +78,33 @@ class SettingsTests(unittest.TestCase):
         self.assertTrue(settings.preload)
         self.assertFalse(settings.artifacts.enabled)
 
+    def test_verification_batch_settings_fall_back_to_global_values(self):
+        with patch.dict(os.environ, {"LOCALIZATION_BATCH_SIZE": "6", "TEXT_DETECTION_BATCH_SIZE": "5", "TEXT_RECOGNITION_BATCH_SIZE": "7", "MRZ_RECOGNITION_BATCH_SIZE": "8"}, clear=True):
+            settings = Settings.from_env()
+        self.assertEqual((5, 7), (
+            settings.verification.text_detection_batch_size,
+            settings.verification.text_recognition_batch_size,
+        ))
+
+    def test_verification_batch_settings_override_only_verification(self):
+        with patch.dict(os.environ, {
+            "LOCALIZATION_BATCH_SIZE": "6", "TEXT_DETECTION_BATCH_SIZE": "5",
+            "TEXT_RECOGNITION_BATCH_SIZE": "7", "MRZ_RECOGNITION_BATCH_SIZE": "8",
+            "VERIFICATION_TEXT_DETECTION_BATCH_SIZE": "2",
+            "VERIFICATION_TEXT_RECOGNITION_BATCH_SIZE": "3",
+        }, clear=True):
+            settings = Settings.from_env()
+        self.assertEqual((6, 5, 7, 8), (
+            settings.runtime.localization_batch_size,
+            settings.runtime.text_detection_batch_size,
+            settings.runtime.text_recognition_batch_size,
+            settings.runtime.mrz_recognition_batch_size,
+        ))
+        self.assertEqual((2, 3), (
+            settings.verification.text_detection_batch_size,
+            settings.verification.text_recognition_batch_size,
+        ))
+
     def test_multiple_recognition_processes_are_cpu_only(self):
         with patch.dict(
             os.environ,

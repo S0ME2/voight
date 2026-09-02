@@ -1,7 +1,7 @@
 """Reproducible, CPU-only analysis of the optimization-six benchmark artifacts.
 
 This script only reads benchmark evidence and annotations.  All derived files
-are written below ``visual_analysis``; it never imports the OCR pipeline or
+are written below ``09.visual-analysis``; it never imports the OCR pipeline or
 changes production settings.
 """
 
@@ -156,15 +156,15 @@ class Analysis:
     def write_observed_tables(self) -> None:
         """Export source-emitted measurement fields without calculating new metrics."""
         raw_specs = {
-            "00_baseline": [
-                ("passport", "00_baseline/passport_full/raw_measurements.jsonl"),
-                ("id_card", "00_baseline/id_full/raw_measurements.jsonl"),
-                ("driving_license", "00_baseline/driving_full/raw_measurements.jsonl"),
-                ("passport_visible_probe", "00_baseline/passport_visible_probe/raw_measurements.jsonl"),
+            "01.baseline": [
+                ("passport", "01.baseline/02.passport-full/raw_measurements.jsonl"),
+                ("id_card", "01.baseline/03.id-card-full/raw_measurements.jsonl"),
+                ("driving_license", "01.baseline/04.driving-license-full/raw_measurements.jsonl"),
+                ("passport_visible_probe", "01.baseline/01.passport-visible-probe/raw_measurements.jsonl"),
             ],
-            "01_recognition_batch": [("", "01_recognition_batch/raw.jsonl")],
-            "02_split_visible_mrz": [("", "02_split_visible_mrz/raw.jsonl")],
-            "99_final": [("", "99_final/raw.jsonl")],
+            "02.recognition-batch": [("", "02.recognition-batch/raw.jsonl")],
+            "03.split-visible-mrz": [("", "03.split-visible-mrz/raw.jsonl")],
+            "08.final-result": [("", "08.final-result/raw.jsonl")],
         }
         timing_fields = ("variant", "document_type", "repeat", "logical_count", "physical_count", "status", "total_seconds", "client_seconds", "server_seconds", "error")
         for name, specs in raw_specs.items():
@@ -175,29 +175,29 @@ class Analysis:
             self.write_observed_table(name, rows, "Direct fields copied from the experiment JSONL. Stage columns are the emitted stage timings; blank means the source row did not contain that field. No throughput, speedup, or accuracy is calculated here.")
 
         model_fields = ("model", "configuration", "batch_size", "repeat", "status", "total_recognition_seconds", "lines", "lines_per_second", "milliseconds_per_line", "model_call_count", "submitted_batch_sizes", "tensor_batch_sizes", "exact_text_match_rate", "differing_lines", "score_difference_count", "error")
-        rows = [self.observed_row(row, "03_recognizer_models/raw.jsonl", index, model_fields) for index, row in enumerate(self.all_jsonl.get("03_recognizer_models/raw.jsonl", []), 1)]
-        self.write_observed_table("03_recognizer_models", rows, "Direct fixed-corpus recognizer benchmark fields. `lines_per_second` and `milliseconds_per_line` are present only when emitted by the model benchmark.")
+        rows = [self.observed_row(row, "04.recognizer-models/raw.jsonl", index, model_fields) for index, row in enumerate(self.all_jsonl.get("04.recognizer-models/raw.jsonl", []), 1)]
+        self.write_observed_table("04.recognizer-models", rows, "Direct fixed-corpus recognizer benchmark fields. `lines_per_second` and `milliseconds_per_line` are present only when emitted by the model benchmark.")
 
         runtime_fields = ("backend", "threads", "status", "load_seconds", "median_seconds", "lines_per_second", "error")
-        rows = [self.observed_row(row, "04_cpu_runtime/raw.jsonl", index, runtime_fields) for index, row in enumerate(self.all_jsonl.get("04_cpu_runtime/raw.jsonl", []), 1)]
-        self.write_observed_table("04_cpu_runtime", rows, "Direct CPU runtime rows. The source stores median inference time, not individual repeat samples.")
+        rows = [self.observed_row(row, "05.cpu-runtime/raw.jsonl", index, runtime_fields) for index, row in enumerate(self.all_jsonl.get("05.cpu-runtime/raw.jsonl", []), 1)]
+        self.write_observed_table("05.cpu-runtime", rows, "Direct CPU runtime rows. The source stores median inference time, not individual repeat samples.")
 
         row_fields = ("kind", "document_id", "variant", "repeat", "seconds", "line_count", "lines_per_second", "correctness")
         rows = []
-        for index, row in enumerate(self.all_jsonl.get("05_mrz_rows/raw.jsonl", []), 1):
-            value = self.observed_row(row, "05_mrz_rows/raw.jsonl", index, row_fields)
+        for index, row in enumerate(self.all_jsonl.get("06.mrz-rows/raw.jsonl", []), 1):
+            value = self.observed_row(row, "06.mrz-rows/raw.jsonl", index, row_fields)
             value["correctness"] = json.dumps(value["correctness"], sort_keys=True) if value.get("correctness") is not None else None
             for stage, stage_value in (row.get("stages") or {}).items(): value[f"stage_{stage}_seconds"] = stage_value
             rows.append(value)
-        self.write_observed_table("05_mrz_rows", rows, "Direct MRZ row experiment fields. `lines_per_second` is retained only where the source emitted it; no seconds-per-line inverse is added.")
+        self.write_observed_table("06.mrz-rows", rows, "Direct MRZ row experiment fields. `lines_per_second` is retained only where the source emitted it; no seconds-per-line inverse is added.")
 
         fallback_fields = ("kind", "document_id", "fast_seconds", "valid", "false_accept", "fallback", "fallback_seconds", "total_seconds")
-        rows = [self.observed_row(row, "06_fast_fallback/raw.jsonl", index, fallback_fields) for index, row in enumerate(self.all_jsonl.get("06_fast_fallback/raw.jsonl", []), 1) if row.get("document_id")]
-        self.write_observed_table("06_fast_fallback", rows, "Direct per-document fast/fallback fields. MRZ output strings are intentionally omitted; validity and false-accept flags are copied as emitted.")
+        rows = [self.observed_row(row, "07.fast-fallback/raw.jsonl", index, fallback_fields) for index, row in enumerate(self.all_jsonl.get("07.fast-fallback/raw.jsonl", []), 1) if row.get("document_id")]
+        self.write_observed_table("07.fast-fallback", rows, "Direct per-document fast/fallback fields. MRZ output strings are intentionally omitted; validity and false-accept flags are copied as emitted.")
 
-        summary = json_or_empty(self.root / "06_fast_fallback/summary.json") or {}
-        summary_rows = [{"source_file": "06_fast_fallback/summary.json", "metric": key, "value": value} for key, value in summary.items() if not isinstance(value, (dict, list))]
-        self.write_observed_table("06_fast_fallback_summary", summary_rows, "Scalar fields copied directly from the experiment summary JSON; no rates are recalculated.")
+        summary = json_or_empty(self.root / "07.fast-fallback/summary.json") or {}
+        summary_rows = [{"source_file": "07.fast-fallback/summary.json", "metric": key, "value": value} for key, value in summary.items() if not isinstance(value, (dict, list))]
+        self.write_observed_table("07.fast-fallback_summary", summary_rows, "Scalar fields copied directly from the experiment summary JSON; no rates are recalculated.")
 
         correctness_rows = []
         correctness_paths = [
@@ -212,7 +212,7 @@ class Analysis:
                     for key, child in value.items(): stack.append((f"{metric_path}.{key}".strip("."), child))
                 elif isinstance(value, (int, float, str, bool)) or value is None:
                     correctness_rows.append({"source_file": str(path.relative_to(self.root)), "metric_path": metric_path, "value": value})
-        for relative in ("01_recognition_batch/summary.json", "02_split_visible_mrz/summary.json"):
+        for relative in ("02.recognition-batch/summary.json", "03.split-visible-mrz/summary.json"):
             payload = json_or_empty(self.root / relative) or {}
             for key, value in (payload.get("correctness") or {}).items():
                 stack = [(key, value)]
@@ -261,7 +261,7 @@ class Analysis:
         return entry.get("state") in {"value", "empty"}
 
     def output_rows(self) -> dict[tuple[str, str], dict[str, Any]]:
-        rows = self.all_jsonl.get("99_final/raw.jsonl", [])
+        rows = self.all_jsonl.get("08.final-result/raw.jsonl", [])
         result = {}
         for row in rows:
             if row.get("repeat") == 1 and row.get("outputs") and row.get("variant") in {"SAFE_OBSERVED", "FASTEST_EXPERIMENTAL"}:
@@ -362,39 +362,39 @@ class Analysis:
         rows = []
         # Original full-pipeline baseline.
         for kind in DOC_TYPES:
-            path = {"passport": "00_baseline/passport_full/raw_measurements.jsonl", "id_card": "00_baseline/id_full/raw_measurements.jsonl", "driving_license": "00_baseline/driving_full/raw_measurements.jsonl"}[kind]
+            path = {"passport": "01.baseline/02.passport-full/raw_measurements.jsonl", "id_card": "01.baseline/03.id-card-full/raw_measurements.jsonl", "driving_license": "01.baseline/04.driving-license-full/raw_measurements.jsonl"}[kind]
             for row in self.all_jsonl.get(path, []):
                 if row.get("status") == "ok" and int(row.get("logical_count", 0)) == len([a for a in self.annotations.values() if a.get("document_type") == kind]):
-                    rows.append({"experiment": "00_baseline", "document_type": kind, "configuration": "Baseline", "repeat": row.get("repeat"), "median_seconds": row.get("total_seconds"), "seconds": row.get("total_seconds"), "docs_per_second": len([a for a in self.annotations.values() if a.get("document_type") == kind]) / float(row.get("total_seconds")), "lines_per_second": None, "stages": row.get("stages", {})})
+                    rows.append({"experiment": "01.baseline", "document_type": kind, "configuration": "Baseline", "repeat": row.get("repeat"), "median_seconds": row.get("total_seconds"), "seconds": row.get("total_seconds"), "docs_per_second": len([a for a in self.annotations.values() if a.get("document_type") == kind]) / float(row.get("total_seconds")), "lines_per_second": None, "stages": row.get("stages", {})})
         # Final integrated runs.
-        for row in self.all_jsonl.get("99_final/raw.jsonl", []):
+        for row in self.all_jsonl.get("08.final-result/raw.jsonl", []):
             if row.get("document_type") in DOC_TYPES:
                 n = len([a for a in self.annotations.values() if a.get("document_type") == row["document_type"]])
-                rows.append({"experiment": "99_final", "document_type": row["document_type"], "configuration": row.get("variant"), "repeat": row.get("repeat"), "median_seconds": row.get("seconds"), "seconds": row.get("seconds"), "docs_per_second": n / float(row["seconds"]), "lines_per_second": None, "stages": row.get("stages", {})})
+                rows.append({"experiment": "08.final-result", "document_type": row["document_type"], "configuration": row.get("variant"), "repeat": row.get("repeat"), "median_seconds": row.get("seconds"), "seconds": row.get("seconds"), "docs_per_second": n / float(row["seconds"]), "lines_per_second": None, "stages": row.get("stages", {})})
         # Experiment 1 visible timing.
-        for row in self.all_jsonl.get("01_recognition_batch/raw.jsonl", []):
+        for row in self.all_jsonl.get("02.recognition-batch/raw.jsonl", []):
             batch = row.get("variant", "").split("batch=")[-1] if "batch=" in row.get("variant", "") else None
             if batch is not None and row.get("document_type") in DOC_TYPES:
                 n = len([a for a in self.annotations.values() if a.get("document_type") == row["document_type"]])
-                rows.append({"experiment": "01_recognition_batch", "document_type": row["document_type"], "configuration": f"batch={batch}", "repeat": row.get("repeat"), "median_seconds": row.get("total_seconds"), "seconds": row.get("total_seconds"), "docs_per_second": n / float(row["total_seconds"]), "lines_per_second": None, "stages": row.get("stages", {})})
+                rows.append({"experiment": "02.recognition-batch", "document_type": row["document_type"], "configuration": f"batch={batch}", "repeat": row.get("repeat"), "median_seconds": row.get("total_seconds"), "seconds": row.get("total_seconds"), "docs_per_second": n / float(row["total_seconds"]), "lines_per_second": None, "stages": row.get("stages", {})})
         # Experiment 2 modes.
-        for row in self.all_jsonl.get("02_split_visible_mrz/raw.jsonl", []):
+        for row in self.all_jsonl.get("03.split-visible-mrz/raw.jsonl", []):
             if row.get("variant") in {"CURRENT_COMBINED", "SPLIT_SAME_BATCH", "SPLIT_TUNED_BATCH"}:
                 n = len([a for a in self.annotations.values() if a.get("document_type") == row["document_type"]])
-                rows.append({"experiment": "02_split_visible_mrz", "document_type": row["document_type"], "configuration": row["variant"], "repeat": row.get("repeat"), "median_seconds": row.get("total_seconds"), "seconds": row.get("total_seconds"), "docs_per_second": n / float(row["total_seconds"]), "lines_per_second": None, "stages": row.get("stages", {})})
+                rows.append({"experiment": "03.split-visible-mrz", "document_type": row["document_type"], "configuration": row["variant"], "repeat": row.get("repeat"), "median_seconds": row.get("total_seconds"), "seconds": row.get("total_seconds"), "docs_per_second": n / float(row["total_seconds"]), "lines_per_second": None, "stages": row.get("stages", {})})
         # Fixed-corpus recognizer benchmark.
-        for row in self.all_jsonl.get("03_recognizer_models/raw.jsonl", []):
+        for row in self.all_jsonl.get("04.recognizer-models/raw.jsonl", []):
             if row.get("status") == "ok":
-                rows.append({"experiment": "03_recognizer_models", "document_type": "fixed_corpus", "configuration": row.get("model"), "repeat": row.get("repeat"), "median_seconds": row.get("total_recognition_seconds"), "seconds": row.get("total_recognition_seconds"), "docs_per_second": None, "lines_per_second": row.get("lines_per_second"), "milliseconds_per_line": row.get("milliseconds_per_line"), "exact_text_match_rate": row.get("exact_text_match_rate"), "stages": {}})
+                rows.append({"experiment": "04.recognizer-models", "document_type": "fixed_corpus", "configuration": row.get("model"), "repeat": row.get("repeat"), "median_seconds": row.get("total_recognition_seconds"), "seconds": row.get("total_recognition_seconds"), "docs_per_second": None, "lines_per_second": row.get("lines_per_second"), "milliseconds_per_line": row.get("milliseconds_per_line"), "exact_text_match_rate": row.get("exact_text_match_rate"), "stages": {}})
         # Experiment 6 timing is per-document aggregate for the two visible modes.
-        summary = json_or_empty(self.root / "06_fast_fallback/summary.json") or {}
+        summary = json_or_empty(self.root / "07.fast-fallback/summary.json") or {}
         for item in summary.get("visible_modes", []):
-            rows.append({"experiment": "06_fast_fallback", "document_type": item.get("kind"), "configuration": item.get("variant"), "repeat": 1, "median_seconds": item.get("seconds"), "seconds": item.get("seconds"), "docs_per_second": len([a for a in self.annotations.values() if a.get("document_type") == item.get("kind")]) / float(item.get("seconds")), "lines_per_second": None, "stages": {}})
+            rows.append({"experiment": "07.fast-fallback", "document_type": item.get("kind"), "configuration": item.get("variant"), "repeat": 1, "median_seconds": item.get("seconds"), "seconds": item.get("seconds"), "docs_per_second": len([a for a in self.annotations.values() if a.get("document_type") == item.get("kind")]) / float(item.get("seconds")), "lines_per_second": None, "stages": {}})
         return pd.DataFrame(rows)
 
     def baseline_correctness(self) -> pd.DataFrame:
         rows = []
-        paths = {"passport": "00_baseline/passport_full/correctness.json", "id_card": "00_baseline/id_full/correctness.json", "driving_license": "00_baseline/driving_full/correctness.json"}
+        paths = {"passport": "01.baseline/02.passport-full/correctness.json", "id_card": "01.baseline/03.id-card-full/correctness.json", "driving_license": "01.baseline/04.driving-license-full/correctness.json"}
         for kind, path in paths.items():
             value = json_or_empty(self.root / path) or {}
             candidates = [(k, v) for k, v in value.items() if k.startswith({"passport": "passport_full", "id_card": "id_card_full", "driving_license": "driving_license_full"}[kind]) and v.get("visible", {}).get("evaluated") == sum(1 for a in self.annotations.values() if a.get("document_type") == kind for e in a.get("fields", {}).values() if self.scorable(e))]
@@ -406,15 +406,15 @@ class Analysis:
         for (variant, kind), row in self.output_rows().items():
             vis, _, _, _ = self.score_outputs(variant, kind, row["outputs"], "visible")
             mrz, _, _, _ = self.score_outputs(variant, kind, row["outputs"], "mrz")
-            rows.append({"document_type": kind, "configuration": variant, "scorable_count": vis.get("scorable_count"), "exact_correct": vis.get("exact_correct"), "exact_rate": vis.get("exact_rate"), "character_accuracy": vis.get("character_accuracy"), "MRZ_full_exact": mrz.get("full_exact"), "MRZ_documents": mrz.get("documents"), "MRZ_line_exact": mrz.get("line_exact"), "MRZ_lines": mrz.get("lines"), "parser_success": None, "validation_success": None, "false_valid_MRZ": None, "source": "99_final/raw.jsonl scored against annotations"})
+            rows.append({"document_type": kind, "configuration": variant, "scorable_count": vis.get("scorable_count"), "exact_correct": vis.get("exact_correct"), "exact_rate": vis.get("exact_rate"), "character_accuracy": vis.get("character_accuracy"), "MRZ_full_exact": mrz.get("full_exact"), "MRZ_documents": mrz.get("documents"), "MRZ_line_exact": mrz.get("line_exact"), "MRZ_lines": mrz.get("lines"), "parser_success": None, "validation_success": None, "false_valid_MRZ": None, "source": "08.final-result/raw.jsonl scored against annotations"})
         # V0/V1 aggregate was emitted by experiment 6 and is a distinct path.
-        summary = json_or_empty(self.root / "06_fast_fallback/summary.json") or {}
+        summary = json_or_empty(self.root / "07.fast-fallback/summary.json") or {}
         for mode in summary.get("visible_modes", []):
             correctness = next(iter(mode.get("correctness", {}).values()), {})
             vis = correctness.get("visible", {})
             mrz = correctness.get("mrz", {})
-            false_accepts = sum(1 for raw in self.all_jsonl.get("06_fast_fallback/raw.jsonl", []) if raw.get("kind") == mode.get("kind") and raw.get("false_accept"))
-            rows.append({"document_type": mode.get("kind"), "configuration": mode.get("variant"), "scorable_count": vis.get("evaluated"), "exact_correct": vis.get("exact"), "exact_rate": vis.get("exact", 0) / vis.get("evaluated", 1) if vis.get("evaluated") else None, "character_accuracy": vis.get("characters", 0) / vis.get("character_total", 1) if vis.get("character_total") else None, "MRZ_full_exact": mrz.get("full_exact"), "MRZ_documents": mrz.get("documents"), "MRZ_line_exact": mrz.get("line_exact"), "MRZ_lines": mrz.get("lines"), "parser_success": mrz.get("parser_success"), "validation_success": mrz.get("validation_success"), "false_valid_MRZ": false_accepts if mode.get("variant") == "V1_FAST_ONLY" else None, "source": "06_fast_fallback/summary.json"})
+            false_accepts = sum(1 for raw in self.all_jsonl.get("07.fast-fallback/raw.jsonl", []) if raw.get("kind") == mode.get("kind") and raw.get("false_accept"))
+            rows.append({"document_type": mode.get("kind"), "configuration": mode.get("variant"), "scorable_count": vis.get("evaluated"), "exact_correct": vis.get("exact"), "exact_rate": vis.get("exact", 0) / vis.get("evaluated", 1) if vis.get("evaluated") else None, "character_accuracy": vis.get("characters", 0) / vis.get("character_total", 1) if vis.get("character_total") else None, "MRZ_full_exact": mrz.get("full_exact"), "MRZ_documents": mrz.get("documents"), "MRZ_line_exact": mrz.get("line_exact"), "MRZ_lines": mrz.get("lines"), "parser_success": mrz.get("parser_success"), "validation_success": mrz.get("validation_success"), "false_valid_MRZ": false_accepts if mode.get("variant") == "V1_FAST_ONLY" else None, "source": "07.fast-fallback/summary.json"})
         frame = pd.DataFrame(rows).drop_duplicates(subset=["document_type", "configuration", "source"])
         for col in ("exact_rate", "character_accuracy"):
             frame[f"{col}_low"] = [wilson(int(r["exact_correct"] or 0), int(r["scorable_count"] or 0))[0] if col == "exact_rate" else None for _, r in frame.iterrows()]
@@ -452,7 +452,7 @@ class Analysis:
         ax.legend(fontsize=8)
 
     def plot_performance(self, timings: pd.DataFrame) -> None:
-        finals = timings[timings["experiment"].isin(["00_baseline", "99_final"])].copy()
+        finals = timings[timings["experiment"].isin(["01.baseline", "08.final-result"])].copy()
         finals = finals[finals["document_type"].isin(DOC_TYPES)]
         finals = finals[finals["configuration"].isin(["Baseline", "SAFE_OBSERVED", "FASTEST_EXPERIMENTAL"])]
         self.make_plot("01_final_throughput", "Final full-pipeline throughput", "Docs per second for baseline, safe observed, and fastest experimental configurations.", "Final integrated runs are measured combined configurations; no speedup is claimed for missing MRZ-only baselines.", lambda fig, ax: (self.grouped_bars(ax, finals.assign(configuration=finals.configuration.replace({"Baseline": "Baseline"})), "document_type", "docs_per_second", "configuration", DOC_TYPES), ax.set_ylabel("documents / second")))
@@ -465,7 +465,7 @@ class Analysis:
             if base:
                 speed_rows.append({"document_type": row.document_type, "configuration": row.configuration, "speedup": base / row.median_seconds})
         speed = pd.DataFrame(speed_rows)
-        self.make_plot("02_speedup_vs_baseline", "E2E speedup versus baseline", "Measured final-config speedup from the same full-pipeline baseline scope.", "Only final full-pipeline rows with a legitimate 00_baseline counterpart are included.", lambda fig, ax: (ax.axvline(1, color="black", lw=1), ax.barh([f"{DISPLAY_TYPES[r.document_type]} — {r.configuration}" for _, r in speed.iterrows()], speed.speedup, color=[COLORS.get(r.configuration, "#777") for _, r in speed.iterrows()]), ax.set_xlabel("speedup (baseline median / candidate median)")))
+        self.make_plot("02_speedup_vs_baseline", "E2E speedup versus baseline", "Measured final-config speedup from the same full-pipeline baseline scope.", "Only final full-pipeline rows with a legitimate 01.baseline counterpart are included.", lambda fig, ax: (ax.axvline(1, color="black", lw=1), ax.barh([f"{DISPLAY_TYPES[r.document_type]} — {r.configuration}" for _, r in speed.iterrows()], speed.speedup, color=[COLORS.get(r.configuration, "#777") for _, r in speed.iterrows()]), ax.set_xlabel("speedup (baseline median / candidate median)")))
 
     def plot_accuracy(self, accuracy: pd.DataFrame) -> None:
         visible = accuracy[accuracy.configuration.isin(["Baseline", "SAFE_OBSERVED", "FASTEST_EXPERIMENTAL", "V0_MEDIUM_BASELINE", "V1_FAST_ONLY"])].copy()
@@ -486,7 +486,7 @@ class Analysis:
         self.make_plot("04_mrz_accuracy_overview", "MRZ OCR accuracy: full, line, and character metrics", "Full-MRZ exact, line exact, and character accuracy remain separate.", "Parser and check-digit validation are not treated as OCR correctness; unavailable values remain unavailable.", lambda fig, ax: (frame.pivot_table(index=["document_type", "configuration"], columns="metric", values="rate").plot.bar(ax=ax), ax.set_ylabel("rate"), ax.set_ylim(0, 1.05), ax.tick_params(axis="x", rotation=70)))
 
     def plot_batch(self, timings: pd.DataFrame) -> None:
-        frame = timings[(timings.experiment == "01_recognition_batch") & timings.configuration.str.startswith("batch=")].copy()
+        frame = timings[(timings.experiment == "02.recognition-batch") & timings.configuration.str.startswith("batch=")].copy()
         frame["batch"] = frame.configuration.str.replace("batch=", "", regex=False).astype(int)
         for kind in DOC_TYPES:
             part = frame[frame.document_type == kind]
@@ -494,7 +494,7 @@ class Analysis:
             self.make_plot(f"06_batch_e2e_{kind}", f"Experiment 1 — {DISPLAY_TYPES[kind]} batch size vs E2E seconds", "Measured E2E seconds for each recognition batch size.", "This is the visible benchmark path, not a full MRZ-inclusive baseline for every document type.", lambda fig, ax, part=part: (ax.plot(part.batch, part.seconds, "o-"), ax.axvline(32, color="grey", ls="--"), ax.set_xlabel("recognition batch size"), ax.set_ylabel("seconds")))
 
     def plot_split(self, timings: pd.DataFrame) -> None:
-        frame = timings[timings.experiment == "02_split_visible_mrz"].copy()
+        frame = timings[timings.experiment == "03.split-visible-mrz"].copy()
         frame["configuration"] = frame.configuration.astype(str)
         self.make_plot("07_split_total_seconds", "Experiment 2 — combined versus split OCR", "Total measured seconds for current combined and split modes.", "Split modes are harness comparisons; output correctness is aggregate-only and full paired text is unavailable.", lambda fig, ax: (self.grouped_bars(ax, frame, "document_type", "seconds", "configuration", ["passport", "id_card"]), ax.set_ylabel("seconds")))
         stages = []
@@ -529,7 +529,7 @@ class Analysis:
         ax.set_ylabel("seconds"); ax.tick_params(axis="x", rotation=60); ax.legend(fontsize=8)
 
     def plot_models(self, timings: pd.DataFrame) -> None:
-        frame = timings[timings.experiment == "03_recognizer_models"].copy()
+        frame = timings[timings.experiment == "04.recognizer-models"].copy()
         if frame.empty:
             return
         med = frame.groupby("configuration", as_index=False).agg(lines_per_second=("lines_per_second", "median"), milliseconds_per_line=("milliseconds_per_line", "median"), exact_text_match_rate=("exact_text_match_rate", "median"))
@@ -539,7 +539,7 @@ class Analysis:
         self.make_plot("08d_model_speed_accuracy", "Experiment 3 — fixed-corpus speed versus exact match", "Throughput versus exact text match for successful fixed-corpus model runs.", "The missing medium point is intentionally not estimated or plotted.", lambda fig, ax: (ax.scatter(med.lines_per_second, med.exact_text_match_rate, s=70), [ax.annotate(r.configuration, (r.lines_per_second, r.exact_text_match_rate), fontsize=8) for _, r in med.iterrows()], ax.set_xlabel("lines/s"), ax.set_ylabel("exact text match rate"), ax.set_ylim(0, 1.05)))
 
     def plot_threads(self) -> None:
-        rows = self.all_jsonl.get("04_cpu_runtime/raw.jsonl", [])
+        rows = self.all_jsonl.get("05.cpu-runtime/raw.jsonl", [])
         frame = pd.DataFrame([r for r in rows if r.get("backend") == "paddle" and r.get("status") == "ok"])
         if frame.empty:
             return
@@ -549,7 +549,7 @@ class Analysis:
         availability.to_csv(self.tables / "runtime_availability.csv", index=False)
 
     def plot_mrz_rows(self) -> None:
-        rows = self.all_jsonl.get("05_mrz_rows/raw.jsonl", [])
+        rows = self.all_jsonl.get("06.mrz-rows/raw.jsonl", [])
         frame = pd.DataFrame([r for r in rows if r.get("variant") and r.get("variant") != "DETECTOR_BASED_MEDIUM"])
         if frame.empty:
             return
@@ -560,7 +560,7 @@ class Analysis:
             pd.DataFrame([{"document_type": kind, "configuration": v, "median_seconds": median(g.seconds), "median_lines_per_second": median(g.lines_per_second), "accuracy": "unavailable"} for v, g in part.groupby("variant")]).to_csv(self.tables / f"mrz_rows_{kind}.csv", index=False)
 
     def plot_fallback(self) -> None:
-        rows = [r for r in self.all_jsonl.get("06_fast_fallback/raw.jsonl", []) if "document_id" in r]
+        rows = [r for r in self.all_jsonl.get("07.fast-fallback/raw.jsonl", []) if "document_id" in r]
         frame = pd.DataFrame(rows)
         if frame.empty:
             return
@@ -734,7 +734,7 @@ class Analysis:
             self.make_plot("19c_mrz_edit_distance_distribution", "MRZ normalized edit-distance distribution", "Full reconstructed MRZ-line near misses for stored final outputs.", "Parser/check-digit status is intentionally not substituted for line text comparison.", lambda fig, ax: (mrz_frame.boxplot(column="normalized_edit_distance", by="configuration", ax=ax), ax.set_title(""), fig.suptitle("MRZ line normalized edit distance"), ax.set_ylabel("distance / line length")))
 
     def plot_stage_and_amdahl(self, timings: pd.DataFrame) -> None:
-        frame = timings[(timings.experiment.isin(["00_baseline", "99_final"])) & timings.document_type.isin(DOC_TYPES) & timings.configuration.isin(["Baseline", "SAFE_OBSERVED", "FASTEST_EXPERIMENTAL"])].copy()
+        frame = timings[(timings.experiment.isin(["01.baseline", "08.final-result"])) & timings.document_type.isin(DOC_TYPES) & timings.configuration.isin(["Baseline", "SAFE_OBSERVED", "FASTEST_EXPERIMENTAL"])].copy()
         stage_rows = []
         for (kind, config), group in frame.groupby(["document_type", "configuration"]):
             row = {"document_type": kind, "configuration": config}
@@ -755,13 +755,13 @@ class Analysis:
         self.make_plot("21_amdahl_upper_bound", "Theoretical Amdahl upper bound — not measured speedup", "Upper-bound speedup if an entire baseline stage disappeared, using measured stage shares.", "This is a theoretical upper bound and does not predict a real optimization result.", lambda fig, ax: (amdahl_frame.pivot(index="document_type", columns="removed_stage", values="theoretical_max_speedup").plot.bar(ax=ax), ax.set_ylabel("theoretical maximum speedup"), ax.axhline(1, color="black", lw=1), ax.tick_params(axis="x", rotation=0)))
 
     def plot_repeat_distributions(self, timings: pd.DataFrame) -> None:
-        frame = timings[(timings.experiment.isin(["00_baseline", "99_final"])) & timings.configuration.isin(["Baseline", "SAFE_OBSERVED", "FASTEST_EXPERIMENTAL"])].copy()
+        frame = timings[(timings.experiment.isin(["01.baseline", "08.final-result"])) & timings.configuration.isin(["Baseline", "SAFE_OBSERVED", "FASTEST_EXPERIMENTAL"])].copy()
         if frame.empty: return
         self.make_plot("24_timing_distributions", "Repeated full-pipeline timing distributions", "All emitted repeat timings for baseline and final full-pipeline configurations.", "These are the samples emitted by the benchmark; the plot does not manufacture variance for single-median microbenchmarks.", lambda fig, ax: (frame.assign(label=frame.document_type.map(DISPLAY_TYPES) + " — " + frame.configuration).boxplot(column="seconds", by="label", ax=ax, rot=70), ax.set_title(""), fig.suptitle("Full-pipeline timing distributions"), ax.set_ylabel("seconds")))
 
     def plot_opportunities(self, timings: pd.DataFrame, transitions: pd.DataFrame) -> None:
-        baseline = timings[(timings.experiment == "00_baseline") & (timings.configuration == "Baseline")].groupby("document_type").seconds.median()
-        final = timings[(timings.experiment == "99_final") & timings.configuration.isin(["SAFE_OBSERVED", "FASTEST_EXPERIMENTAL"])].groupby(["document_type", "configuration"]).seconds.median()
+        baseline = timings[(timings.experiment == "01.baseline") & (timings.configuration == "Baseline")].groupby("document_type").seconds.median()
+        final = timings[(timings.experiment == "08.final-result") & timings.configuration.isin(["SAFE_OBSERVED", "FASTEST_EXPERIMENTAL"])].groupby(["document_type", "configuration"]).seconds.median()
         rows = []
         for kind in DOC_TYPES:
             for config in ("SAFE_OBSERVED", "FASTEST_EXPERIMENTAL"):
@@ -769,7 +769,7 @@ class Analysis:
                     reg = transitions.loc[transitions.document_type == kind, "regressions"].iloc[0] if config == "FASTEST_EXPERIMENTAL" and not transitions.loc[transitions.document_type == kind].empty else 0
                     rows.append({"optimization_family": f"{DISPLAY_TYPES[kind]} {config}", "document_type": kind, "configuration": config, "measured_speedup": baseline[kind] / final[(kind, config)], "regression_count": reg})
         # Same-experiment comparisons are retained as opportunities, not combined scores.
-        batch = timings[timings.experiment == "01_recognition_batch"].copy()
+        batch = timings[timings.experiment == "02.recognition-batch"].copy()
         for kind, part in batch.groupby("document_type"):
             refs = part[part.configuration == "batch=32"].seconds
             if not refs.empty:
@@ -777,24 +777,24 @@ class Analysis:
                     candidate = part[part.configuration == config].seconds
                     if not candidate.empty:
                         rows.append({"optimization_family": f"{DISPLAY_TYPES[kind]} {config} vs batch=32", "document_type": kind, "configuration": config, "measured_speedup": refs.median() / candidate.median(), "regression_count": 0})
-        split = timings[timings.experiment == "02_split_visible_mrz"]
+        split = timings[timings.experiment == "03.split-visible-mrz"]
         for kind, part in split.groupby("document_type"):
             ref = part[part.configuration == "CURRENT_COMBINED"].seconds
             if not ref.empty:
                 for config in ("SPLIT_SAME_BATCH", "SPLIT_TUNED_BATCH"):
                     candidate = part[part.configuration == config].seconds
                     if not candidate.empty: rows.append({"optimization_family": f"{DISPLAY_TYPES[kind]} {config}", "document_type": kind, "configuration": config, "measured_speedup": ref.median() / candidate.median(), "regression_count": np.nan})
-        models = timings[timings.experiment == "03_recognizer_models"]
+        models = timings[timings.experiment == "04.recognizer-models"]
         if not models.empty:
             ref = models[models.configuration == "PP-OCRv6_small_rec"].lines_per_second.median()
             tiny = models[models.configuration == "PP-OCRv6_tiny_rec"].lines_per_second.median()
             if ref and tiny: rows.append({"optimization_family": "Tiny vs Small fixed-crop", "document_type": "fixed_corpus", "configuration": "PP-OCRv6_tiny_rec", "measured_speedup": tiny / ref, "regression_count": np.nan})
-        thread_rows = pd.DataFrame(self.all_jsonl.get("04_cpu_runtime/raw.jsonl", []))
+        thread_rows = pd.DataFrame(self.all_jsonl.get("05.cpu-runtime/raw.jsonl", []))
         if not thread_rows.empty:
             thread_rows = thread_rows[(thread_rows.backend == "paddle") & (thread_rows.status == "ok")]
             if not thread_rows[thread_rows.threads == 4].empty:
                 rows.append({"optimization_family": "CPU threads 12 vs 4", "document_type": "fixed_line", "configuration": "12 threads", "measured_speedup": thread_rows[thread_rows.threads == 4].median_seconds.iloc[0] / thread_rows[thread_rows.threads == 12].median_seconds.iloc[0], "regression_count": np.nan})
-        fallback = timings[timings.experiment == "06_fast_fallback"]
+        fallback = timings[timings.experiment == "07.fast-fallback"]
         for kind, part in fallback.groupby("document_type"):
             ref = part[part.configuration == "V0_MEDIUM_BASELINE"].docs_per_second
             cand = part[part.configuration == "V1_FAST_ONLY"].docs_per_second
@@ -826,7 +826,7 @@ class Analysis:
             self.make_plot(f"22_frontier_visible_{kind}", f"Visible OCR speed versus exact match — {DISPLAY_TYPES[kind]}", "Full-pipeline docs/s versus field exact-match rate for stored final configurations.", "Pareto interpretation is only for this validation corpus; throughput and correctness are not combined into a score.", lambda fig, ax, frame=frame: (ax.scatter(frame.throughput, frame.exact_rate, s=80), [ax.annotate(r.configuration, (r.throughput, r.exact_rate), fontsize=8) for _, r in frame.iterrows()], ax.set_xlabel("docs/s"), ax.set_ylabel("field exact-match rate"), ax.set_ylim(0, 1.05)))
             self.make_plot(f"22b_frontier_visible_char_{kind}", f"Visible OCR speed versus character accuracy — {DISPLAY_TYPES[kind]}", "Full-pipeline docs/s versus character accuracy.", "Character accuracy can hide field-boundary failures; inspect exact match and transitions together.", lambda fig, ax, frame=frame: (ax.scatter(frame.throughput, frame.character_accuracy, s=80), [ax.annotate(r.configuration, (r.throughput, r.character_accuracy), fontsize=8) for _, r in frame.iterrows()], ax.set_xlabel("docs/s"), ax.set_ylabel("character accuracy"), ax.set_ylim(0, 1.05)))
         mrz_rows = []
-        fb = pd.DataFrame([r for r in self.all_jsonl.get("06_fast_fallback/raw.jsonl", []) if "document_id" in r])
+        fb = pd.DataFrame([r for r in self.all_jsonl.get("07.fast-fallback/raw.jsonl", []) if "document_id" in r])
         for kind in ("passport", "id_card"):
             part = fb[fb.kind == kind]
             if part.empty: continue
@@ -854,7 +854,7 @@ class Analysis:
 
     def write_report(self, timings: pd.DataFrame, accuracy: pd.DataFrame, transitions: pd.DataFrame, docs: pd.DataFrame) -> None:
         coverage = self.annotations_coverage()
-        speed = timings[(timings.experiment == "99_final") & timings.document_type.isin(DOC_TYPES) & timings.configuration.isin(["SAFE_OBSERVED", "FASTEST_EXPERIMENTAL"])].groupby(["document_type", "configuration"]).seconds.median().unstack()
+        speed = timings[(timings.experiment == "08.final-result") & timings.document_type.isin(DOC_TYPES) & timings.configuration.isin(["SAFE_OBSERVED", "FASTEST_EXPERIMENTAL"])].groupby(["document_type", "configuration"]).seconds.median().unstack()
         lines = ["# Optimization-six visual analysis", "", "## Executive interpretation", "", "All conclusions below are limited to this small validation corpus: 9 passports, 4 logical ID cards / 8 sides, and 7 driving licences. Absolute rates are therefore evidence for paired investigation, not production guarantees.", ""]
         if not speed.empty:
             for kind in DOC_TYPES:
@@ -875,17 +875,17 @@ class Analysis:
         timings.to_csv(self.data / "timing_repeats.csv", index=False)
         performance = timings.groupby(["experiment", "document_type", "configuration"], as_index=False).agg(median_seconds=("seconds", "median"), docs_per_second=("docs_per_second", "median"), lines_per_second=("lines_per_second", "median"))
         performance["speedup"] = np.nan
-        full_baseline = performance[(performance.experiment == "00_baseline") & (performance.configuration == "Baseline")].set_index("document_type").median_seconds.to_dict()
+        full_baseline = performance[(performance.experiment == "01.baseline") & (performance.configuration == "Baseline")].set_index("document_type").median_seconds.to_dict()
         for experiment, group in performance.groupby("experiment"):
-            if experiment == "99_final":
+            if experiment == "08.final-result":
                 refs = full_baseline
                 mask = (performance.experiment == experiment) & performance.document_type.isin(refs) & performance.configuration.isin(["SAFE_OBSERVED", "FASTEST_EXPERIMENTAL"])
                 performance.loc[mask, "speedup"] = performance.loc[mask].apply(lambda r: refs[r.document_type] / r.median_seconds if pd.notna(r.median_seconds) else np.nan, axis=1)
-            elif experiment == "02_split_visible_mrz":
+            elif experiment == "03.split-visible-mrz":
                 refs = group[group.configuration == "CURRENT_COMBINED"].set_index("document_type").median_seconds.to_dict()
                 mask = (performance.experiment == experiment) & performance.document_type.isin(refs)
                 performance.loc[mask, "speedup"] = performance.loc[mask].apply(lambda r: refs[r.document_type] / r.median_seconds if pd.notna(r.median_seconds) else np.nan, axis=1)
-            elif experiment == "01_recognition_batch":
+            elif experiment == "02.recognition-batch":
                 for kind, ref in group[group.configuration == "batch=32"].set_index("document_type").median_seconds.items():
                     mask = (performance.experiment == experiment) & (performance.document_type == kind)
                     performance.loc[mask, "speedup"] = performance.loc[mask].apply(lambda r, ref=ref: ref / r.median_seconds if pd.notna(r.median_seconds) else np.nan, axis=1)
@@ -912,11 +912,11 @@ class Analysis:
         self.plot_opportunities(timings, transitions)
         # A compact machine-readable summary of unavailable items.
         availability = pd.DataFrame([
-            {"item": "03_recognizer_models: medium fixed-crop measurement", "status": "unavailable", "reason": "wrapper emitted no result file"},
-            {"item": "03_recognizer_models: per-document-type model accuracy", "status": "unavailable", "reason": "fixed corpus was emitted as one mixed corpus; no per-corpus annotation join"},
-            {"item": "05_mrz_rows: annotation-scored full MRZ accuracy", "status": "unavailable", "reason": "row-level output did not reconstruct complete MRZ comparison"},
-            {"item": "00_baseline: per-document prediction text", "status": "unavailable", "reason": "raw baseline stores output digests only"},
-            {"item": "04_cpu_runtime: repeat distribution", "status": "unavailable", "reason": "raw file stores medians, not individual repeat samples"},
+            {"item": "04.recognizer-models: medium fixed-crop measurement", "status": "unavailable", "reason": "wrapper emitted no result file"},
+            {"item": "04.recognizer-models: per-document-type model accuracy", "status": "unavailable", "reason": "fixed corpus was emitted as one mixed corpus; no per-corpus annotation join"},
+            {"item": "06.mrz-rows: annotation-scored full MRZ accuracy", "status": "unavailable", "reason": "row-level output did not reconstruct complete MRZ comparison"},
+            {"item": "01.baseline: per-document prediction text", "status": "unavailable", "reason": "raw baseline stores output digests only"},
+            {"item": "05.cpu-runtime: repeat distribution", "status": "unavailable", "reason": "raw file stores medians, not individual repeat samples"},
             {"item": "CPU HPI performance", "status": "unavailable", "reason": "ultra-infer dependency missing; no performance claim made"},
         ])
         availability.to_csv(self.tables / "availability.csv", index=False)
@@ -942,11 +942,11 @@ class Analysis:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path("outputs/benchmarks/optimization_six/20260814T000000Z"))
+    parser.add_argument("--root", type=Path, default=Path("outputs/benchmarks/04.six-optimization-comparison/20260814T000000Z"))
     parser.add_argument("--annotations", type=Path, default=Path("dataset/annotations"))
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    output = args.output or args.root / "visual_analysis"
+    output = args.output or args.root / "09.visual-analysis"
     Analysis(args.root, args.annotations, output).run()
 
 

@@ -1,5 +1,16 @@
 # Local ground-truth annotation
 
+```mermaid
+flowchart LR
+    A["dataset/ images"] --> B["annotate.py<br/>guided prompts"]
+    B --> C["atomic save<br/>per accepted field"]
+    C --> D{"document<br/>complete?"}
+    D -->|no| B
+    D -->|yes| E["annotations/&lt;type&gt;/&lt;id&gt;.json"]
+    E --> F["--validate · --summary"]
+    E --> G["--export → exports/annotations.jsonl"]
+```
+
 Place original images under `dataset/`:
 
 ```text
@@ -62,3 +73,8 @@ Each canonical annotation is one JSON object:
 keys are not annotated yet. Passport and ID-card MRZ lines are independent raw
 ground truth and are never copied to or from visible fields. Driving licences
 have no `mrz` member.
+
+This document-level ground-truth tool is separate from the profile-geometry
+tool in [docs/dataset.md](../../docs/dataset.md). The former records expected
+values under `dataset/annotations/`; the latter promotes reusable rectangles
+from the authorized `annotation_input/` fixtures into `config/`.

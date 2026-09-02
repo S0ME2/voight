@@ -31,7 +31,6 @@ class RepositoryLayoutTests(unittest.TestCase):
             "docs/development.md",
             "docs/benchmarking.md",
             "docs/dataset.md",
-            "docs/gates.md",
             "docs/reorganization-2026-08.md",
         }
         self.assertFalse([path for path in required if not (ROOT / path).is_file()])
@@ -82,6 +81,16 @@ class RepositoryLayoutTests(unittest.TestCase):
             "roi/test_rois.py",
         ):
             self.assertTrue((archived / name).is_file(), name)
+
+    def test_cpu_and_gpu_dependency_sets_stay_separate(self):
+        cpu_lock = (ROOT / "requirements" / "cpu.lock").read_text(encoding="utf-8")
+        gpu_requirements = (ROOT / "requirements" / "gpu.txt").read_text(encoding="utf-8")
+
+        for package in ("docaligner-docsaid", "mrzscanner-docsaid", "onnxruntime"):
+            self.assertRegex(cpu_lock, rf"(?m)^{re.escape(package)}==")
+        self.assertNotRegex(cpu_lock, r"(?m)^(onnxruntime-gpu|paddlepaddle-gpu)==")
+        self.assertIn("onnxruntime-gpu==1.22.0", gpu_requirements)
+        self.assertIn("paddlepaddle-gpu==3.2.2", gpu_requirements)
 
     def test_tracked_project_text_has_no_developer_absolute_paths(self):
         offenders = []

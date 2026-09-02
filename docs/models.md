@@ -11,6 +11,12 @@
 | MRZ recognizer | generic Paddle recognizer | default |
 | Specialized MRZ recognizer | MRZScanner `20250221` | experimental |
 
+The `/v1` routes use the document localizer and MRZ stages where the selected
+layout requires them. The `/verification` OCR routes deliberately use only the
+shared text detector and Latin recognizer over the submitted image(s); their
+`/check` routes use no model. `Models` caches these heavyweight instances per
+process so verification does not load duplicate detector or recognizer models.
+
 PaddleOCR, PaddlePaddle, DocAligner, and MRZScanner are Apache-licensed. The
 optional historical FastMRZ experiment is AGPL-licensed and is excluded from
 production dependencies.

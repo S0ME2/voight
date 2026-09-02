@@ -3,8 +3,10 @@ import threading
 from dataclasses import replace
 from io import BytesIO
 import os
+from pathlib import Path
 import unittest
 import zipfile
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import cv2
@@ -176,7 +178,7 @@ class V1TransportTests(unittest.TestCase):
             "/v1/health/live", "/v1/health/ready",
         ):
             self.assertIn(path, paths)
-        self.assertTrue(all(path.startswith("/v1/") for path in paths))
+        self.assertTrue(all(path.startswith("/v1/") for path in paths if not path.startswith("/verification/")))
         self.assertEqual("#/components/schemas/OcrBatchResponse", paths["/v1/ocr/passport/batch"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"])
         request = paths["/v1/ocr/passport/batch"]["post"]["requestBody"]["content"]["multipart/form-data"]["schema"]
         body = schema["components"]["schemas"][request["$ref"].split("/")[-1]]
@@ -222,6 +224,28 @@ class V1TransportTests(unittest.TestCase):
         self.assertEqual(6, models.runner.calls)
         self.assertEqual([1, 2, 2, 4, 1, 2], models.runner.job_counts)
         self.assertEqual(1, responses[1].json()["diagnostics"]["text_detection"]["model_call_count"])
+
+    def test_v1_writes_request_diagnostics_and_response_artifacts(self):
+        with TemporaryDirectory() as directory:
+            settings = replace(
+                Settings.from_env(),
+                artifacts=ArtifactSettings(True, Path(directory)),
+            )
+            models = Models()
+            with patch("app.main.Models", return_value=models):
+                application = create_app(settings)
+            with TestClient(application) as client:
+                response = client.post(
+                    "/v1/ocr/passport",
+                    files={"image": ("passport.jpg", image_bytes(), "image/jpeg")},
+                )
+
+            self.assertEqual(200, response.status_code)
+            run = next((Path(directory) / "v1_batch").iterdir())
+            self.assertTrue((run / "00_request.json").is_file())
+            self.assertTrue((run / "01_pipeline_diagnostics.json").is_file())
+            self.assertTrue((run / "02_response.json").is_file())
+            self.assertTrue((run / "001_passport").is_dir())
 
 
 class AsyncInferenceGateTests(unittest.IsolatedAsyncioTestCase):

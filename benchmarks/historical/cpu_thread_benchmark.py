@@ -20,7 +20,7 @@ from typing import Any
 import requests
 
 ROOT = Path(__file__).resolve().parents[2]
-OUTPUT = ROOT / "outputs/benchmarks/cpu_thread_benchmark"
+OUTPUT = ROOT / "outputs/benchmarks/11.cpu-thread-count-benchmark"
 IMAGE = "voight:cpu"
 PORT = 18080
 THREADS = (1, 2, 4, 6, 8, 12, 16)
@@ -516,7 +516,7 @@ def main() -> int:
     write_csv(OUTPUT / "raw_results.csv", all_rows)
     write_csv(OUTPUT / "comparison.csv", compact_comparison(all_rows))
     (OUTPUT / "raw_results.json").write_text(json.dumps(all_rows, indent=2), encoding="utf-8")
-    reference_path = ROOT / "outputs/benchmarks/batch_size/20260822T140836Z/summary.json"
+    reference_path = ROOT / "outputs/benchmarks/09.batch-size-sweep/20260822T140836Z/summary.json"
     reference = json.loads(reference_path.read_text(encoding="utf-8")) if reference_path.is_file() else []
     reference = {row["document_type"] if "document_type" in row else {"id_card": "id-card", "driving_license": "driving-license"}.get(row.get("document_type"), row.get("document_type")): row for row in reference if row.get("configuration") == "localization_4_detection_1_recognition_2"}
     current = {row["document_type"]: row for row in compact_comparison(all_rows) if row["thread_count"] == 4}

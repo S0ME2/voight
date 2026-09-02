@@ -141,7 +141,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-root", type=Path, default=ROOT / "dataset")
     parser.add_argument("--model-dir", type=Path, default=ROOT / "models/benchmark")
-    parser.add_argument("--output-root", type=Path, default=ROOT / "outputs/benchmarks/detector_resolution_workload")
+    parser.add_argument("--output-root", type=Path, default=ROOT / "outputs/benchmarks/13.detector-resolution-workload")
     parser.add_argument("--port", type=int, default=8011)
     parser.add_argument("--timeout", type=float, default=900)
     parser.add_argument("--repeats", type=int, default=3)
@@ -166,7 +166,7 @@ def main() -> int:
 
     def run_target(target_pct: float, phase: str) -> None:
         dimension_scale = _scale_for_target(target_pct)
-        label = f"{phase}_{_fmt(target_pct)}"
+        label = f"{len(ready_by_target) + 1:02d}.{phase}-{_fmt(target_pct)}"
         target_dir = output / label
         target_dir.mkdir()
         env = {**BASE_ENV, "TEXT_DETECTOR_PIXEL_SCALE": _fmt(dimension_scale)}

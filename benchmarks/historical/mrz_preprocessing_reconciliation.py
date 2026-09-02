@@ -136,7 +136,7 @@ def _run_preflight(args: argparse.Namespace, documents: list[Any], output: Path)
         write_json(directory / "lifecycle.json", lifecycle)
     traces = [trace for value in payloads.values() for trace in value["payload"].get("diagnostics", {}).get("mrz_crop_trace", [])]
     by_source = {trace["source_image_sha256"]: trace for trace in traces}
-    fixed = json.loads((args.fixed_output / "fixed_crops" / "manifest.json").read_text(encoding="utf-8"))
+    fixed = json.loads((args.fixed_output / "01.fixed-crops" / "manifest.json").read_text(encoding="utf-8"))
     source_hashes = {
         doc.document_id: _source_hash(next(path for role, path in doc.paths if role == ("image" if doc.document_type == "passport" else "back")))
         for doc in documents if doc.document_type in {"passport", "id_card"}
@@ -302,7 +302,7 @@ def main() -> int:
     parser.add_argument("--fixed-output", type=Path, required=True)
     parser.add_argument("--dataset-root", type=Path, default=ROOT / "dataset")
     parser.add_argument("--model-dir", type=Path, default=ROOT / "models/benchmark")
-    parser.add_argument("--output-root", type=Path, default=ROOT / "outputs/benchmarks/mrz_preprocessing_reconciliation")
+    parser.add_argument("--output-root", type=Path, default=ROOT / "outputs/benchmarks/14.mrz-preprocessing-reconciliation")
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--timeout", type=float, default=900)
     parser.add_argument("--port", type=int, default=8041)

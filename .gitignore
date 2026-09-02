@@ -11,25 +11,23 @@ __pycache__/
 build/
 dist/
 
-# Environment and local config
+# Environment and local-only config
 .env
-.codex/
-.claude/
-.personal/
-.github/
+.*/
+
+# Agent/task-local metadata
 AGENTS.md
-
-# Generated artifacts (local only)
-logs/
-logs-from-container/
-outputs/
-dataset/
 experiments/
-models/
-.paddlex/
 
-# Benchmarks results (gitignored)
-benchmarks/results/
+# Generated local data
+/.graphify-out/
+/graphify-out/
+/logs/
+/outputs/
+/dataset/
+/models/
+/.paddlex/
+/benchmarks/results/
 
 # IDE / OS
 .DS_Store

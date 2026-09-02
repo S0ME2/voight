@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import os
+import re
 import time
 from copy import deepcopy
 from collections.abc import Callable, Sequence
@@ -17,7 +18,7 @@ from typing import Any, Literal, TypeVar
 import cv2
 import numpy as np
 
-from app.artifacts import ArtifactWriter
+from app.artifacts import ArtifactWriter, json_default
 from app.config import MrzSettings
 from app.documents.mrz import MrzProfile, apply_contrast, crop_polygon, preprocess, reconstruct, select
 from app.documents.passport_localization import page_corners_from_mrz_width
@@ -51,6 +52,7 @@ class OcrSample:
     role: str | None = None
     document_id: str | None = None
     field_association: str | None = None
+    artifacts: ArtifactWriter | None = None
 
 
 @dataclass(frozen=True)
@@ -199,6 +201,179 @@ def _text_digest(lines: Sequence[str]) -> str:
 
 def _trace_stem(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()[:20]
+
+
+def _write_visual_benchmark_artifacts(
+    samples: Sequence[OcrSample],
+    detection_results: dict[int, Any],
+    lines: Sequence[tuple[int, np.ndarray, np.ndarray]],
+    line_metadata: Sequence[dict[str, Any]],
+    processed_lines: dict[int, np.ndarray],
+    recognition_results: dict[int, Any],
+    recognition_errors: dict[int, Exception],
+    tokens_by_index: dict[int, list[Token]],
+    errors: dict[int, Exception],
+) -> None:
+    root_name = os.getenv("VOIGHT_BENCHMARK_ARTIFACT_DIR")
+    if not root_name:
+        return
+
+    def safe(value: str) -> str:
+        return re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip(".-") or "sample"
+
+    try:
+        root = Path(root_name)
+        request_dir = root / f"ocr-{os.getpid()}-{time.time_ns()}"
+        request_dir.mkdir(parents=True, exist_ok=False)
+        request_manifest = {"samples": [], "errors": {str(index): str(error) for index, error in errors.items()}}
+        for sample_index, sample in enumerate(samples):
+            label = safe(sample.item_id.rsplit(":", 1)[-1])
+            sample_dir = request_dir / f"{sample_index + 1:03d}_{label}"
+            recognition_dir = sample_dir / "recognition"
+            recognition_dir.mkdir(parents=True)
+            cv2.imwrite(str(sample_dir / "source.png"), sample.image)
+            overlay = sample.image.copy()
+            detections = []
+            result = detection_results.get(sample_index)
+            for detection_index, region in enumerate(getattr(result, "regions", ())):
+                polygon = np.asarray(region.polygon, dtype=np.float32).reshape(-1, 2)
+                points = np.round(polygon).astype(np.int32)
+                cv2.polylines(overlay, [points], True, (0, 180, 255), 2)
+                cv2.putText(overlay, f"D{detection_index + 1:03d}", tuple(points[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 100, 255), 2, cv2.LINE_AA)
+                detections.append({"index": detection_index, "polygon": polygon.tolist(), "score": getattr(region, "score", None)})
+            cv2.imwrite(str(sample_dir / "detection.png"), overlay)
+            records = []
+            for line_index, (owner, crop, _) in enumerate(lines):
+                if owner != sample_index:
+                    continue
+                crop_name = f"line_{line_index + 1:03d}.png"
+                processed_name = f"line_{line_index + 1:03d}_processed.png"
+                cv2.imwrite(str(recognition_dir / crop_name), crop)
+                if line_index in processed_lines:
+                    cv2.imwrite(str(recognition_dir / processed_name), processed_lines[line_index])
+                result = recognition_results.get(line_index)
+                records.append({
+                    **line_metadata[line_index],
+                    "crop_file": f"recognition/{crop_name}",
+                    "processed_crop_file": f"recognition/{processed_name}" if line_index in processed_lines else None,
+                    "text": getattr(result, "text", None),
+                    "score": getattr(result, "score", None),
+                    "error": str(recognition_errors[line_index]) if line_index in recognition_errors else None,
+                })
+            (sample_dir / "detection.json").write_text(json.dumps({"coordinate_space": "source image", "detections": detections}, indent=2, default=json_default), encoding="utf-8")
+            (sample_dir / "recognition.json").write_text(json.dumps({"lines": records, "tokens": tokens_by_index.get(sample_index, [])}, indent=2, default=json_default), encoding="utf-8")
+            request_manifest["samples"].append({"sample_id": sample.item_id, "directory": sample_dir.name, "detection_count": len(detections), "recognition_count": len(records)})
+            _write_recognition_contact_sheet(sample_dir / "recognition_contact_sheet.png", recognition_dir, records)
+        (request_dir / "manifest.json").write_text(json.dumps(request_manifest, indent=2, default=json_default), encoding="utf-8")
+    except (OSError, cv2.error, TypeError, ValueError):
+        logger.warning("benchmark visual artifact capture failed", exc_info=True)
+
+
+def _write_runtime_artifacts(
+    samples: Sequence[OcrSample],
+    detection_results: dict[int, Any],
+    lines: Sequence[tuple[int, np.ndarray, np.ndarray]],
+    line_metadata: Sequence[dict[str, Any]],
+    processed_lines: dict[int, np.ndarray],
+    recognition_chunks: Sequence[Sequence[tuple[int, np.ndarray]]],
+    recognition_results: dict[int, Any],
+    recognition_errors: dict[int, Exception],
+    tokens_by_index: dict[int, list[Token]],
+    errors: dict[int, Exception],
+) -> None:
+    """Persist the model boundary evidence when normal artifact logging is on."""
+    for sample_index, sample in enumerate(samples):
+        artifacts = sample.artifacts
+        if artifacts is None or not artifacts.enabled:
+            continue
+
+        detection = detection_results.get(sample_index)
+        detections = []
+        overlay = sample.image.copy()
+        for detection_index, region in enumerate(getattr(detection, "regions", ())):
+            polygon = np.asarray(region.polygon, dtype=np.float32).reshape(-1, 2)
+            points = np.round(polygon).astype(np.int32)
+            cv2.polylines(overlay, [points], True, (0, 180, 255), 2)
+            detections.append(
+                {
+                    "index": detection_index,
+                    "polygon": polygon.tolist(),
+                    "score": getattr(region, "score", None),
+                }
+            )
+        artifacts.save_image("06_text_detection.jpg", overlay)
+        artifacts.save_json(
+            "06_text_detection.json",
+            {
+                "coordinate_space": "source image",
+                "detections": detections,
+                "error": str(errors[sample_index]) if sample_index in errors else None,
+            },
+        )
+
+        recognition_records = []
+        line_number = 0
+        for line_index, (owner, crop, polygon) in enumerate(lines):
+            if owner != sample_index:
+                continue
+            line_number += 1
+            crop_name = f"07_text_line_{line_number:03d}.png"
+            processed_name = f"07_text_line_{line_number:03d}_processed.png"
+            artifacts.save_image(crop_name, crop)
+            if line_index in processed_lines:
+                artifacts.save_image(processed_name, processed_lines[line_index])
+            result = recognition_results.get(line_index)
+            recognition_records.append(
+                {
+                    **line_metadata[line_index],
+                    "source_polygon": np.asarray(polygon).tolist(),
+                    "crop_file": crop_name,
+                    "processed_crop_file": processed_name if line_index in processed_lines else None,
+                    "text": getattr(result, "text", None),
+                    "score": getattr(result, "score", None),
+                    "error": str(recognition_errors[line_index]) if line_index in recognition_errors else None,
+                }
+            )
+        artifacts.save_json(
+            "07_text_recognition.json",
+            {
+                "lines": recognition_records,
+                "tokens": tokens_by_index.get(sample_index, []),
+            },
+        )
+
+    for batch_index, chunk in enumerate(recognition_chunks, start=1):
+        for position, (line_index, image) in enumerate(chunk, start=1):
+            sample = samples[lines[line_index][0]]
+            if sample.artifacts is not None and sample.artifacts.enabled:
+                sample.artifacts.save_image(
+                    f"08_recognition_input_batch_{batch_index:03d}_{position:03d}.png",
+                    image,
+                )
+
+
+def _write_recognition_contact_sheet(path: Path, directory: Path, records: Sequence[dict[str, Any]]) -> None:
+    if not records:
+        return
+    cards = []
+    for record in records:
+        image = cv2.imread(str(directory / Path(record["crop_file"]).name), cv2.IMREAD_COLOR)
+        if image is None:
+            continue
+        image = cv2.resize(image, (460, 80), interpolation=cv2.INTER_AREA)
+        card = np.full((120, 500, 3), 255, dtype=np.uint8)
+        card[5:85, 20:480] = image
+        label = f"L{record['line_index'] + 1}: {record.get('text') or '<error>'}  ({record.get('score')})"
+        cv2.putText(card, label[:62], (10, 108), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 0, 0), 1, cv2.LINE_AA)
+        cards.append(card)
+    if not cards:
+        return
+    columns = 2
+    sheet = np.full(((len(cards) + columns - 1) // columns * 120, columns * 500, 3), 255, dtype=np.uint8)
+    for index, card in enumerate(cards):
+        row, column = divmod(index, columns)
+        sheet[row * 120:(row + 1) * 120, column * 500:(column + 1) * 500] = card
+    cv2.imwrite(str(path), sheet)
 
 
 def _finish_stage(stage: dict[str, Any]) -> None:
@@ -504,6 +679,7 @@ class BatchedOcr:
 
         recognition_results: dict[int, Any] = {}
         recognition_errors: dict[int, Exception] = {}
+        processed_lines: dict[int, np.ndarray] = {}
         recognition_inputs = []
         for index, line in enumerate(lines):
             image = line[1]
@@ -511,6 +687,7 @@ class BatchedOcr:
             preprocess_started = time.perf_counter()
             image = preprocess_variant(image, self.mrz_preprocessing if role == "mrz" else self.visible_preprocessing)
             diagnostics["preprocessing_seconds"]["mrz" if role == "mrz" else "visible"] += time.perf_counter() - preprocess_started
+            processed_lines[index] = image
             if role == "mrz":
                 line_metadata[index].update({
                     "mrz_line_contrast": self.mrz_contrast,
@@ -525,13 +702,25 @@ class BatchedOcr:
             recognition_chunks = self.recognition_packer.pack(recognition_inputs, self.recognition_batch_size)
         else:
             recognition_chunks = []
-            for role in ("visible", "mrz"):
+            for role in ("visible", "mrz", "unknown"):
                 role_inputs = [
                     item for item in recognition_inputs
                     if _sample_role(samples[lines[item[0]][0]]) == role
                 ]
                 role_batch_size = self.mrz_recognition_batch_size if role == "mrz" else self.recognition_batch_size
                 recognition_chunks.extend(self.recognition_packer.pack(role_inputs, role_batch_size))
+        _write_runtime_artifacts(
+            samples,
+            detection_results,
+            lines,
+            line_metadata,
+            processed_lines,
+            recognition_chunks,
+            recognition_results,
+            recognition_errors,
+            {},
+            errors,
+        )
         recognition_started = time.perf_counter()
         for chunk in recognition_chunks:
             results, failures = self._predict_chunk(
@@ -607,6 +796,29 @@ class BatchedOcr:
             }
             for role in ("visible", "mrz")
         }
+        _write_runtime_artifacts(
+            samples,
+            detection_results,
+            lines,
+            line_metadata,
+            processed_lines,
+            recognition_chunks,
+            recognition_results,
+            recognition_errors,
+            tokens_by_index,
+            errors,
+        )
+        _write_visual_benchmark_artifacts(
+            samples,
+            detection_results,
+            lines,
+            line_metadata,
+            processed_lines,
+            recognition_results,
+            recognition_errors,
+            tokens_by_index,
+            errors,
+        )
         return OcrBatchResult(
             tokens={samples[index].item_id: value for index, value in tokens_by_index.items()},
             errors={samples[index].item_id: error for index, error in errors.items()},
@@ -921,6 +1133,7 @@ class ProfileBatchRunner:
                 prepared[item.item_id].profile.field_rois,
                 "visible",
                 item.document_id or (item.item_id.split(":", 2)[1] if ":" in item.item_id else item.item_id),
+                artifacts=prepared[item.item_id].artifacts,
             )
             for item in items
             if item.item_id in prepared
@@ -971,6 +1184,7 @@ class ProfileBatchRunner:
                         f"mrz:{item.item_id}", processed, role="mrz",
                         document_id=item.document_id or (item.item_id.split(":", 2)[1] if ":" in item.item_id else item.item_id),
                         field_association="mrz",
+                        artifacts=item.artifacts,
                     ))
                 else:
                     mrz_crops.append((item.item_id, crop))

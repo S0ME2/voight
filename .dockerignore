@@ -1,36 +1,30 @@
-# VCS
+# Local environment and secrets
+.env
+.env.*
+!.env.example
 
-# Virtual environment
-.venv
+# Local environments and generated data
+.venv/
+.personal/
+.claude/
+.codex/
+dataset/
+logs/
+outputs/
+models/
+.paddlex/
 
-# Bytecode
-__pycache__
+# Python caches
+__pycache__/
 *.py[cod]
 
-# Environment
-.env
-
-# Local data and generated artifacts
-dataset
-logs
-logs-from-container
-outputs
-models
-.paddlex
-
-# Governance (not needed in container)
-.codex
-
-# IDE / OS
+# VCS, IDE, and OS files
 .DS_Store
 *.bak
 code.zip
-
-# Coverage
 .coverage
 .coverage.*
 htmlcov/
 
-# Personal/local config
-.claude
-.personal
+# cpu-test runs repository-layout checks with git metadata.
+# Keep .git in the build context; runtime images do not copy it.

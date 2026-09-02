@@ -12,6 +12,10 @@ class ExecutionRefused(RuntimeError):
     pass
 
 
+DEFAULT_GPU_MODEL = "Tesla V100-PCIE-32GB"
+DEFAULT_DRIVER_VERSION = "535.309.01"
+
+
 @dataclass(frozen=True)
 class GuardResult:
     gpu_id: int
@@ -36,9 +40,12 @@ def require_server_execution(*, execute: bool, image: str = "voight:gpu", gpu_id
         raise ExecutionRefused(f"nvidia-smi failed: {exc}") from exc
     if result.returncode != 0 or not result.stdout.strip():
         raise ExecutionRefused("expected NVIDIA GPU is not visible")
-    expected_model = os.getenv("VOIGHT_GPU_MODEL", "Tesla V100-PCIE-32GB")
+    expected_model = os.getenv("VOIGHT_GPU_MODEL", DEFAULT_GPU_MODEL)
+    expected_driver = os.getenv("VOIGHT_GPU_DRIVER_VERSION", DEFAULT_DRIVER_VERSION)
     if expected_model not in result.stdout:
         raise ExecutionRefused(f"expected GPU model is not visible: {expected_model}")
+    if expected_driver not in result.stdout:
+        raise ExecutionRefused(f"expected NVIDIA driver is not visible: {expected_driver}")
     if not shutil.which("docker"):
         raise ExecutionRefused("docker is not available")
     image_check = runner(["docker", "image", "inspect", image], capture_output=True, text=True, check=False, timeout=10)

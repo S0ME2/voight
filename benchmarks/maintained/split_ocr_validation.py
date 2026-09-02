@@ -313,7 +313,7 @@ def truth_transition(documents: list[Document], baseline: dict[str, Any], candid
 def _fixed_crop_corpus(kind: str, documents: list[Document], settings: Settings, models: Models, directory: Path) -> dict[str, list[np.ndarray]]:
     result = {"visible": [], "mrz": []}
     run = run_variant(settings, models, documents, kind, "CURRENT_COMBINED", 0, capture_inputs=True)
-    fixed = directory / "fixed_crops"; fixed.mkdir(parents=True, exist_ok=True)
+    fixed = directory / "01.fixed-crops"; fixed.mkdir(parents=True, exist_ok=True)
     for sample_id, image in run["runner"].ocr.captured_inputs.items():
         role = sample_id.split(":", 1)[0]
         path = fixed / f"{kind}_{role}_{digest(sample_id)[:12]}.npy"
@@ -369,7 +369,7 @@ def write_csv(path: Path, rows: list[dict[str, Any]], fields: list[str]) -> None
 def plots(directory: Path, rows: list[dict[str, Any]], stages: list[dict[str, Any]], shapes: list[dict[str, Any]], outputs: dict[str, Any]) -> None:
     import matplotlib.pyplot as plt
 
-    plot_dir = directory / "plots"; plot_dir.mkdir(exist_ok=True)
+    plot_dir = directory / "02.plots"; plot_dir.mkdir(exist_ok=True)
     for kind in ("passport", "id_card"):
         values = {mode: statistics.median(row["total_seconds"] for row in rows if row["document_type"] == kind and row["variant"] == mode) for mode in MODES}
         plt.figure(); plt.bar(values.keys(), values.values()); plt.xticks(rotation=25); plt.ylabel("median seconds"); plt.title(kind); plt.tight_layout(); plt.savefig(plot_dir / f"{kind}_variant_median_seconds.png"); plt.close()

@@ -38,8 +38,9 @@ def _args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-root", type=Path, default=ROOT / "dataset")
     parser.add_argument("--model-dir", type=Path, default=Path(os.getenv("MODEL_DIR", ".paddlex")))
-    parser.add_argument("--output-root", type=Path, default=ROOT / "outputs/benchmarks/batch_size/CORRECTED_COMBINED_RUN")
-    parser.add_argument("--baseline-root", type=Path, default=ROOT / "outputs/benchmarks/batch_size/CORRECTED_RUN")
+    # [PLANNED] Created only when this historical correction run is executed.
+    parser.add_argument("--output-root", type=Path, default=ROOT / "outputs/benchmarks/09.batch-size-sweep/20260822T140836Z/21.combined-batch-corrected")
+    parser.add_argument("--baseline-root", type=Path, default=ROOT / "outputs/benchmarks/09.batch-size-sweep/20260822T140836Z")
     parser.add_argument("--port", type=int, default=8013)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--warmup", type=int, default=1)
@@ -70,12 +71,12 @@ def _config(localization: int, detection: int, recognition: int) -> dict[str, ob
 
 
 def _baseline_snapshots(root: Path, documents: dict[str, list[object]]) -> dict[str, dict[int, dict[str, object]]]:
-    base = root if (root / "raw").is_dir() else root / "text_recognition_batch_32"
+    base = root if (root / "raw").is_dir() else root / "20.text-recognition-batch-32"
     snapshots = {}
     for kind, docs in documents.items():
         snapshots[kind] = {}
         for repeat in (1, 2, 3):
-            path = base / "raw" / f"repeat-{repeat}" / f"{kind}.json"
+            path = base / "raw" / f"{repeat:02d}.repeat-{repeat}" / f"{kind}.json"
             if path.is_file():
                 snapshots[kind][repeat] = _snapshot(docs, json.loads(path.read_text())['response'])
     return snapshots
@@ -85,14 +86,14 @@ def main() -> int:
     args = _args()
     documents, manifest = validate_and_manifest(args.dataset_root)
     by_kind = {kind: [doc for doc in documents if doc.document_type == kind] for kind in DOC_TYPES}
-    if not (args.baseline_root / "raw").is_dir() and not (args.baseline_root / "text_recognition_batch_32").is_dir():
+    if not (args.baseline_root / "raw").is_dir() and not (args.baseline_root / "20.text-recognition-batch-32").is_dir():
         raise RuntimeError(f"corrected baseline is missing: {args.baseline_root}")
     output = args.output_root
     output.mkdir(parents=True, exist_ok=False)
     (output / "raw").mkdir()
     (output / "server_logs").mkdir()
     configs = [_config(*values) for values in CONFIGS]
-    (output / "manifest.json").write_text(json.dumps({"dataset": manifest, "configs": configs, "repeats": args.repeats, "warmup": args.warmup, "fresh_server_per_config": True, "cpu_only": True, "baseline": str(args.baseline_root / "text_recognition_batch_32")}, indent=2), encoding="utf-8")
+    (output / "manifest.json").write_text(json.dumps({"dataset": manifest, "configs": configs, "repeats": args.repeats, "warmup": args.warmup, "fresh_server_per_config": True, "cpu_only": True, "baseline": str(args.baseline_root / "20.text-recognition-batch-32")}, indent=2), encoding="utf-8")
     rows, snapshots, failures, routes = [], {}, [], []
     for index, config in enumerate(configs, 1):
         print(f"[{index}/{len(configs)}] {config['name']}", flush=True)
@@ -125,7 +126,7 @@ def main() -> int:
                 raise RuntimeError(f"configured batch size verification failed: expected={expected} actual={warmup_sizes}")
             (config_dir / "batch_size_verification.json").write_text(json.dumps({"expected": expected, "observed_in_warmup": warmup_sizes}, indent=2), encoding="utf-8")
             for repeat in range(1, args.repeats + 1):
-                repeat_dir = config_dir / "raw" / f"repeat-{repeat}"
+                repeat_dir = config_dir / "raw" / f"{repeat:02d}.repeat-{repeat}"
                 repeat_dir.mkdir(parents=True)
                 for kind, docs in by_kind.items():
                     payload, seconds = _post(kind, docs, args.port, args.timeout)

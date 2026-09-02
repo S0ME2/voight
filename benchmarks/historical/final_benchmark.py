@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-root",
         type=Path,
-        default=Path("./outputs/benchmarks/ocr"),
+        default=Path("./outputs/benchmarks/01.ocr-recognition-sweeps"),
         help="Root directory where the timestamped final benchmark is saved.",
     )
     parser.add_argument("--device", default="cpu", help="PaddleOCR device, for example cpu or gpu:0.")

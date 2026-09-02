@@ -15,7 +15,7 @@ from benchmarks.gpu.helpers import csv_write
 
 
 def _rows(directory: Path) -> list[dict]:
-    for name in ("comparison.csv", "raw_results.csv", "raw_measurements.csv", "results.csv"):
+    for name in ("comparison.csv", "summary.csv", "raw_results.csv", "raw_measurements.csv", "results.csv"):
         path = directory / name
         if path.is_file():
             with path.open(newline="", encoding="utf-8") as handle:
@@ -42,10 +42,10 @@ def compare(gpu_dir: Path, cpu_dir: Path, output: Path) -> list[dict]:
     for row in gpu or [{}]:
         cpu_row = cpu_by_type.get(row.get("document_type"), cpu_baseline)
         cpu_latency = _number(cpu_row, "latency_seconds", "median_latency_seconds", "median_e2e_seconds", "e2e_seconds", "total_latency_seconds")
-        cpu_throughput = _number(cpu_row, "throughput_per_second", "throughput_docs_per_second", "docs_per_second", "items_per_second")
+        cpu_throughput = _number(cpu_row, "throughput_per_second", "throughput_docs_per_second", "median_run_documents_per_second", "docs_per_second", "items_per_second")
         latency = _number(row, "latency_seconds", "median_latency_seconds", "median_e2e_seconds", "e2e_seconds", "total_latency_seconds")
         throughput = _number(row, "aggregate_throughput_per_second", "throughput_per_second", "throughput_docs_per_second", "docs_per_second", "items_per_second")
-        rows.append({"cpu_artifact": str(cpu_dir), "gpu_artifact": str(gpu_dir), "configuration": row.get("config_id", "baseline"), "cpu_latency_seconds": cpu_latency, "gpu_latency_seconds": latency, "speedup": cpu_latency / latency if cpu_latency and latency else None, "cpu_throughput_per_second": cpu_throughput, "gpu_throughput_per_second": throughput, "throughput_speedup": throughput / cpu_throughput if cpu_throughput and throughput else None, "cpu_rss_mb": _number(cpu_row, "peak_rss_mb", "peak_rss_mb_max", "peak_process_memory_mb", "rss_mb"), "gpu_host_rss_mb": _number(row, "host_rss_mb", "peak_rss_mb"), "gpu_vram_mb": _number(row, "peak_vram_mb"), "semantic_change_count": _number(row, "semantic_change_count"), "correctness": _number(row, "correctness", "field_correctness", "document_correctness")})
+        rows.append({"cpu_artifact": str(cpu_dir), "gpu_artifact": str(gpu_dir), "configuration": row.get("config_id", "baseline"), "cpu_latency_seconds": cpu_latency, "gpu_latency_seconds": latency, "speedup": cpu_latency / latency if cpu_latency and latency else None, "cpu_throughput_per_second": cpu_throughput, "gpu_throughput_per_second": throughput, "throughput_speedup": throughput / cpu_throughput if cpu_throughput and throughput else None, "cpu_rss_mb": _number(cpu_row, "peak_rss_mb", "peak_rss_mb_max", "peak_process_memory_mb", "rss_mb"), "gpu_host_rss_mb": _number(row, "host_rss_mb", "peak_rss_mb"), "gpu_vram_mb": _number(row, "peak_vram_mb"), "semantic_change_count": _number(row, "semantic_change_count"), "cpu_correctness": _number(cpu_row, "field_verification_accuracy", "correctness", "field_correctness", "document_correctness"), "gpu_correctness": _number(row, "correctness", "field_correctness", "document_correctness")})
         rows[-1]["document_type"] = row.get("document_type")
         rows[-1]["confidence_only_change_count"] = _number(row, "confidence_only_change_count")
     output.mkdir(parents=True, exist_ok=True)
@@ -63,7 +63,8 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("gpu_output", type=Path)
     parser.add_argument("cpu_output", type=Path)
-    parser.add_argument("--output", type=Path, default=Path("outputs/benchmarks/cpu_gpu_comparison"))
+    # [PLANNED] Created only after a GPU result exists for comparison.
+    parser.add_argument("--output", type=Path, default=Path("outputs/benchmarks/23.gpu-server-benchmark/cpu-vs-gpu-comparison"))
     args = parser.parse_args(argv)
     print(json.dumps(compare(args.gpu_output, args.cpu_output, args.output), indent=2))
     return 0

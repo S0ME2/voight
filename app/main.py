@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
 from app.api.v1 import create_v1_router
+from app.api.verification import create_verification_router
 from app.contracts import ErrorCode, ErrorResult
 from app.config import Settings
 from app.models import Models
@@ -35,8 +36,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if close := getattr(models, "close", None):
                 close()
 
-    app = FastAPI(title="VoightKampff OCR API", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(
+        title="VoightKampff OCR API",
+        version="0.3.0",
+        lifespan=lifespan,
+        openapi_tags=[
+            {"name": "Health", "description": "Service liveness and readiness checks."},
+            {"name": "v1 OCR", "description": "Profile-driven OCR for supported document layouts."},
+            {"name": "Verification OCR", "description": "Whole-image OCR returning raw text lines."},
+            {"name": "Verification checks", "description": "Compare expected fields with OCR lines."},
+        ],
+    )
     app.include_router(create_v1_router(settings, models))
+    app.include_router(create_verification_router(settings, models))
 
     @app.exception_handler(HTTPException)
     async def contract_errors(_, exc):

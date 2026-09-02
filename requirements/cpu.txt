@@ -1,3 +1,7 @@
+# Direct CPU runtime pins. Use cpu.lock for the complete install.
+# Do not include models.txt here: capybara-docsaid declares onnxruntime-gpu
+# on Linux, so the CPU lock installs the same adapters with CPU ONNX Runtime
+# using the deliberate --no-deps strategy documented in cpu.lock.
 -r common.txt
 onnxruntime==1.22.0
 paddlepaddle==3.2.2

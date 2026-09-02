@@ -7,11 +7,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from benchmarks.gpu.collectors import parse_nvidia_smi
+from benchmarks.gpu.compare_cpu_gpu import compare
 from benchmarks.gpu.gpu_benchmark import arguments, build_configs
 from benchmarks.gpu.helpers import compare_semantics, semantic_digest, stats
 from benchmarks.gpu.matrix import expand, from_json
 from benchmarks.gpu.reporting import summary_rows
-from benchmarks.gpu.runtime_guard import ExecutionRefused, require_server_execution
+from benchmarks.gpu.runtime_guard import DEFAULT_DRIVER_VERSION, ExecutionRefused, require_server_execution
 
 
 class GpuBenchmarkTests(unittest.TestCase):
@@ -43,6 +44,19 @@ class GpuBenchmarkTests(unittest.TestCase):
         rows = summary_rows([{"config_id": "a", "axis": "x", "phase": "measured", "latency_seconds": 1, "throughput_per_second": 2, "status": "ok", "cleanup_verified": True}])
         self.assertEqual(1, rows[0]["latency_seconds"])
 
+    def test_cpu_gpu_compare_reads_current_cpu_summary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            gpu = root / "gpu"
+            cpu = root / "cpu"
+            gpu.mkdir()
+            cpu.mkdir()
+            (gpu / "comparison.csv").write_text("config_id,document_type,aggregate_throughput_per_second\nbaseline,passport,6\n", encoding="utf-8")
+            (cpu / "summary.csv").write_text("document_type,median_run_documents_per_second\npassport,3\n", encoding="utf-8")
+            rows = compare(gpu, cpu, root / "out")
+            self.assertEqual(3, rows[0]["cpu_throughput_per_second"])
+            self.assertEqual(2, rows[0]["throughput_speedup"])
+
     def test_guard_refuses_before_gpu_checks_when_ack_missing(self):
         with patch.dict(os.environ, {"RUNTIME_TARGET": "gpu"}, clear=True), patch("benchmarks.gpu.runtime_guard.shutil.which") as which, patch("benchmarks.gpu.runtime_guard.subprocess.run") as run:
             with self.assertRaisesRegex(ExecutionRefused, "VOIGHT_GPU_BENCHMARK_HOST"):
@@ -60,13 +74,36 @@ class GpuBenchmarkTests(unittest.TestCase):
         def runner(command, **_):
             calls.append(command)
             if command[0] == "nvidia-smi":
-                return CompletedProcess(command, 0, "0, Tesla V100-PCIE-32GB, GPU, 535\n", "")
+                return CompletedProcess(command, 0, f"0, Tesla V100-PCIE-32GB, GPU, {DEFAULT_DRIVER_VERSION}\n", "")
             return CompletedProcess(command, 1, "", "missing")
         with patch.dict(os.environ, {"RUNTIME_TARGET": "gpu", "VOIGHT_GPU_BENCHMARK_HOST": "1", "GPU_ID": "0"}, clear=True), patch("benchmarks.gpu.runtime_guard.shutil.which", return_value="/usr/bin/tool"):
             with self.assertRaisesRegex(ExecutionRefused, "image"):
                 require_server_execution(execute=True, runner=runner)
         self.assertEqual("nvidia-smi", calls[0][0])
         self.assertEqual("docker", calls[1][0])
+
+    def test_guard_refuses_wrong_driver(self):
+        def runner(command, **_):
+            return CompletedProcess(command, 0, "0, Tesla V100-PCIE-32GB, GPU, 535.999.99\n", "")
+        with patch.dict(os.environ, {"RUNTIME_TARGET": "gpu", "VOIGHT_GPU_BENCHMARK_HOST": "1", "GPU_ID": "0"}, clear=True), patch("benchmarks.gpu.runtime_guard.shutil.which", return_value="/usr/bin/tool"):
+            with self.assertRaisesRegex(ExecutionRefused, "driver"):
+                require_server_execution(execute=True, runner=runner)
+
+    def test_guard_accepts_configured_gpu_identity(self):
+        def runner(command, **_):
+            if command[0] == "nvidia-smi":
+                return CompletedProcess(command, 0, "0, NVIDIA A100, GPU, 550.54.15\n", "")
+            return CompletedProcess(command, 0, "", "")
+        environment = {
+            "RUNTIME_TARGET": "gpu",
+            "VOIGHT_GPU_BENCHMARK_HOST": "1",
+            "VOIGHT_GPU_MODEL": "NVIDIA A100",
+            "VOIGHT_GPU_DRIVER_VERSION": "550.54.15",
+            "GPU_ID": "0",
+        }
+        with patch.dict(os.environ, environment, clear=True), patch("benchmarks.gpu.runtime_guard.shutil.which", return_value="/usr/bin/tool"):
+            result = require_server_execution(execute=True, runner=runner)
+        self.assertEqual("NVIDIA A100", result.nvidia_smi.split(", ")[1])
 
     def test_plan_parser_does_not_require_server_ack(self):
         with tempfile.TemporaryDirectory() as directory:

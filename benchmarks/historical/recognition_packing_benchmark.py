@@ -52,7 +52,7 @@ def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-root", type=Path, default=ROOT / "dataset")
     parser.add_argument("--model-dir", type=Path, default=ROOT / "models/benchmark")
-    parser.add_argument("--output-root", type=Path, default=ROOT / "outputs/benchmarks/recognition_packing")
+    parser.add_argument("--output-root", type=Path, default=ROOT / "outputs/benchmarks/12.recognition-packing-comparison")
     parser.add_argument("--port", type=int, default=8017)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--warmup", type=int, default=1)
@@ -175,13 +175,13 @@ def main() -> int:
     (output / "raw").mkdir()
     (output / "server_logs").mkdir()
     configs = [{"strategy": strategy, "packing": _env(strategy, args.recognition_batch_size)["TEXT_RECOGNITION_PACKING"], "env": _env(strategy, args.recognition_batch_size)} for strategy in args.strategies]
-    (output / "manifest.json").write_text(json.dumps({"dataset": manifest, "configs": configs, "repeats": args.repeats, "warmup": args.warmup, "fresh_server_per_config": True, "cpu_only": True, "thread_configuration_source": "outputs/benchmarks/cpu_thread_benchmark/comparison.csv; 4 threads was fastest mean E2E"}, indent=2), encoding="utf-8")
+    (output / "manifest.json").write_text(json.dumps({"dataset": manifest, "configs": configs, "repeats": args.repeats, "warmup": args.warmup, "fresh_server_per_config": True, "cpu_only": True, "thread_configuration_source": "outputs/benchmarks/11.cpu-thread-count-benchmark/comparison.csv; 4 threads was fastest mean E2E"}, indent=2), encoding="utf-8")
 
     rows: list[dict[str, Any]] = []
     responses: dict[str, dict[str, dict[int, dict[str, Any]]]] = defaultdict(lambda: defaultdict(dict))
     for number, config in enumerate(configs, 1):
         strategy = config["strategy"]
-        run_dir = output / f"{number:02d}_{strategy}"
+        run_dir = output / f"{number:02d}.{strategy}-packing"
         run_dir.mkdir()
         server = Server(args, run_dir, config["env"])
         lifecycle: dict[str, Any] = {"memory_before_mb": (_available_memory() or 0) / 1024 / 1024}
@@ -197,7 +197,7 @@ def main() -> int:
                 for kind, docs in by_kind.items():
                     payload, seconds = _post(kind, docs, args.port, args.timeout)
                     responses[strategy][kind][repeat] = payload
-                    raw_path = run_dir / "raw" / f"repeat-{repeat}"
+                    raw_path = run_dir / "raw" / f"{repeat:02d}.repeat-{repeat}"
                     raw_path.mkdir(parents=True, exist_ok=True)
                     (raw_path / f"{kind}.json").write_text(json.dumps({"client_seconds": seconds, "response": payload}, indent=2), encoding="utf-8")
                     current_payload = responses["current"][kind].get(repeat) if strategy != "current" else None

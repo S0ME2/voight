@@ -1,5 +1,6 @@
 import unittest
 from dataclasses import replace
+from tempfile import TemporaryDirectory
 from types import ModuleType
 from pathlib import Path
 from unittest.mock import patch
@@ -107,6 +108,28 @@ def parse(assignments):
 
 
 class BatchedOcrTests(unittest.TestCase):
+    def test_runtime_artifacts_include_detection_and_recognition_intermediates(self):
+        with TemporaryDirectory() as directory:
+            artifact_directory = Path(directory) / "sample"
+            artifact_directory.mkdir()
+            writer = ArtifactWriter(Path(directory), "", "sample", True)
+            BatchedOcr(
+                DetectionStub(),
+                RecognitionStub(),
+                detection_batch_size=2,
+                recognition_batch_size=2,
+            ).run([OcrSample("sample", image(10), artifacts=writer)])
+
+            for name in (
+                "06_text_detection.jpg",
+                "06_text_detection.json",
+                "07_text_line_001.png",
+                "07_text_line_001_processed.png",
+                "07_text_recognition.json",
+            ):
+                self.assertTrue((artifact_directory / name).is_file(), name)
+            self.assertTrue(any(artifact_directory.glob("08_recognition_input_batch_*.png")))
+
     def test_true_batches_restore_variable_line_counts_and_match_single_items(self):
         detector = DetectionStub({10: 1, 20: 3, 30: 2})
         recognizer = RecognitionStub()
@@ -249,6 +272,15 @@ class BatchedOcrTests(unittest.TestCase):
 
         self.assertEqual([1, 1], recognizer.batch_sizes)
         self.assertEqual([1, 1], result.diagnostics["text_recognition"]["tensor_batch_sizes"])
+
+    def test_untyped_verification_samples_use_visible_limit_when_mrz_limit_differs(self):
+        recognizer = RecognitionStub()
+        result = BatchedOcr(
+            DetectionStub(), recognizer, detection_batch_size=4, recognition_batch_size=4, mrz_recognition_batch_size=1
+        ).run([OcrSample(str(index), image(index + 10)) for index in range(5)])
+        self.assertFalse(result.errors)
+        self.assertEqual([4, 1], recognizer.batch_sizes)
+        self.assertEqual([4, 1], result.diagnostics["text_recognition"]["tensor_batch_sizes"])
 
     def test_retained_lines_across_field_rois_keep_reading_order(self):
         class Lines:

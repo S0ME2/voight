@@ -93,6 +93,14 @@ class RuntimeSettings:
 
 
 @dataclass(frozen=True)
+class VerificationBatchSettings:
+    """Optional verification-only caller limits; model instances stay shared."""
+
+    text_detection_batch_size: int
+    text_recognition_batch_size: int
+
+
+@dataclass(frozen=True)
 class TextModelSettings:
     backend: str
     model: str
@@ -140,6 +148,7 @@ class Settings:
     driving_license: DrivingLicenseSettings
     batch: BatchSettings = field(default_factory=BatchSettings)
     runtime: RuntimeSettings = field(default_factory=RuntimeSettings)
+    verification: VerificationBatchSettings | None = None
     models: ModelSettings = field(default_factory=ModelSettings)
     profiles: ProfileSettings = field(default_factory=ProfileSettings)
 
@@ -191,6 +200,13 @@ class Settings:
         for name, value in positive.items():
             if value <= 0:
                 raise ValueError(f"{name} must be greater than zero")
+        if self.verification is not None:
+            for name, value in {
+                "VERIFICATION_TEXT_DETECTION_BATCH_SIZE": self.verification.text_detection_batch_size,
+                "VERIFICATION_TEXT_RECOGNITION_BATCH_SIZE": self.verification.text_recognition_batch_size,
+            }.items():
+                if value <= 0:
+                    raise ValueError(f"{name} must be greater than zero")
         if self.runtime.text_detector_limit_side_len is not None and self.runtime.text_detector_limit_side_len <= 0:
             raise ValueError("TEXT_DETECTOR_LIMIT_SIDE_LEN must be greater than zero")
         if self.batch.max_archive_uncompressed_bytes < self.batch.max_file_bytes:
@@ -225,6 +241,10 @@ class Settings:
         legacy_device = os.getenv("OCR_DEVICE")
         target = os.getenv("RUNTIME_TARGET", legacy_device or "cpu").strip().lower()
         device = (legacy_device or target).strip().lower()
+        localization_batch_size = _positive_int("LOCALIZATION_BATCH_SIZE", 4)
+        text_detection_batch_size = _positive_int("TEXT_DETECTION_BATCH_SIZE", 1)
+        text_recognition_batch_size = _positive_int("TEXT_RECOGNITION_BATCH_SIZE", 2)
+        mrz_recognition_batch_size = _positive_int("MRZ_RECOGNITION_BATCH_SIZE", 2)
         settings = cls(
             preload=_bool("PRELOAD", False),
             artifacts=ArtifactSettings(
@@ -267,14 +287,10 @@ class Settings:
                 target=target,
                 cpu_threads=_positive_int("CPU_THREADS", 4),
                 queue_limit=_positive_int("REQUEST_QUEUE_LIMIT", 32),
-                localization_batch_size=_positive_int("LOCALIZATION_BATCH_SIZE", 4),
-                text_detection_batch_size=_positive_int("TEXT_DETECTION_BATCH_SIZE", 1),
-                text_recognition_batch_size=_positive_int(
-                    "TEXT_RECOGNITION_BATCH_SIZE", 2
-                ),
-                mrz_recognition_batch_size=_positive_int(
-                    "MRZ_RECOGNITION_BATCH_SIZE", 2
-                ),
+                localization_batch_size=localization_batch_size,
+                text_detection_batch_size=text_detection_batch_size,
+                text_recognition_batch_size=text_recognition_batch_size,
+                mrz_recognition_batch_size=mrz_recognition_batch_size,
                 text_recognition_processes=_positive_int(
                     "TEXT_RECOGNITION_PROCESSES", 1
                 ),
@@ -288,6 +304,14 @@ class Settings:
                 text_detector_preprocessing=os.getenv("TEXT_DETECTOR_PREPROCESSING", "original").strip().lower(),
                 visible_recognition_preprocessing=os.getenv("VISIBLE_RECOGNITION_PREPROCESSING", "original").strip().lower(),
                 mrz_preprocessing=os.getenv("MRZ_PREPROCESSING", "contrast_1.50").strip().lower(),
+            ),
+            verification=VerificationBatchSettings(
+                text_detection_batch_size=_positive_int(
+                    "VERIFICATION_TEXT_DETECTION_BATCH_SIZE", text_detection_batch_size
+                ),
+                text_recognition_batch_size=_positive_int(
+                    "VERIFICATION_TEXT_RECOGNITION_BATCH_SIZE", text_recognition_batch_size
+                ),
             ),
             models=ModelSettings(
                 _optional_path("MODEL_DIR"),

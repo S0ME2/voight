@@ -92,7 +92,7 @@ def main() -> int:
     (run / "skipped_candidates.json").write_text(json.dumps(verification_skips + duplicate_rows, indent=2), encoding="utf-8")
     (run / "baseline_tensor_dimensions.json").write_text(json.dumps({kind: {"actual_tensor_shapes": baselines[kind]["detector_tensor_shapes"], "actual_tensor_pixel_counts": baselines[kind]["detector_tensor_pixel_counts"], "actual_detector_pixels_total": baselines[kind]["detector_tensor_pixel_count_total"]} for kind in DOC_TYPES}, indent=2), encoding="utf-8")
     (run / "tested_tensor_dimensions.json").write_text(json.dumps({kind: [{"requested_pixel_target_pct": row["requested_pixel_target_pct"], "actual_tensor_shapes": json.loads(row["actual_tensor_shapes"]), "actual_detector_pixels_total": row["actual_detector_pixels"]} for row in summaries if row["document_type"] == kind] for kind in DOC_TYPES}, indent=2), encoding="utf-8")
-    ready = json.loads((run / "broad_100" / "ready.json").read_text())
+    ready = json.loads((run / "05.broad-100" / "ready.json").read_text())
     (run / "effective_baseline_resize_config.json").write_text(json.dumps(ready.get("models", {}).get("text_detector", {}).get("resize"), indent=2), encoding="utf-8")
     print(run)
     print(f"rows={len(rows)} summaries={len(summaries)} cleanup={all(row['cleanup_verified'] for row in rows)}")

@@ -1272,7 +1272,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("./outputs/benchmarks/ocr"),
+        default=Path("./outputs/benchmarks/01.ocr-recognition-sweeps"),
     )
 
     parser.add_argument(

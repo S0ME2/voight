@@ -7,11 +7,14 @@ Required environment:
 
 ```bash
 export RUNTIME_TARGET=gpu
-export OCR_DEVICE=gpu
 export GPU_ID=0
 export VOIGHT_GPU_BENCHMARK_HOST=1
 export TEXT_RECOGNITION_PROCESSES=1
 ```
+
+The execution guard defaults to the deployment V100 and driver listed below.
+For another GPU, set `VOIGHT_GPU_MODEL` and `VOIGHT_GPU_DRIVER_VERSION` to the
+identity reported by `nvidia-smi` before running the benchmark.
 
 Confirm the host is Tesla V100-PCIE-32GB with driver 535.309.01 and host CUDA
 capability 12.2, NVIDIA Docker support, free disk, and an unused benchmark

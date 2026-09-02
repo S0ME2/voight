@@ -50,7 +50,7 @@ def _args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-root", type=Path, default=ROOT / "dataset")
     parser.add_argument("--model-dir", type=Path, default=Path(os.getenv("MODEL_DIR", ".paddlex")))
-    parser.add_argument("--output-root", type=Path, default=ROOT / "outputs/benchmarks/batch_size")
+    parser.add_argument("--output-root", type=Path, default=ROOT / "outputs/benchmarks/09.batch-size-sweep")
     parser.add_argument("--port", type=int, default=8012)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--warmup", type=int, default=1)
@@ -226,7 +226,7 @@ def main() -> int:
     rows, snapshots, failures, route_evidence = [], {}, [], []
     for index, config in enumerate(all_configs, 1):
         print(f"[{index}/{len(all_configs)}] {config['name']}", flush=True)
-        config_dir = output / config["name"]
+        config_dir = output / f"{index:02d}.{config['name'].replace('_', '-') }"
         config_dir.mkdir()
         env = config["env"]
         server = Server(args, config_dir, env)
@@ -249,7 +249,7 @@ def main() -> int:
                 raise RuntimeError(f"configured batch size verification failed: expected={expected_sizes} actual={loaded_sizes}")
             (config_dir / "batch_size_verification.json").write_text(json.dumps({"expected": expected_sizes, "observed_in_warmup": loaded_sizes}, indent=2), encoding="utf-8")
             for repeat in range(1, args.repeats + 1):
-                repeat_dir = config_dir / "raw" / f"repeat-{repeat}"
+                repeat_dir = config_dir / "raw" / f"{repeat:02d}.repeat-{repeat}"
                 repeat_dir.mkdir(parents=True)
                 for kind, docs in by_kind.items():
                     payload, seconds = _post(kind, docs, args.port, args.timeout)

@@ -3,7 +3,19 @@
 This reusable, staged harness is for the V100 server. Planning, statistics,
 digest, parser, and comparison code are CPU-safe and do not import Paddle,
 ONNX Runtime, CUDA, or Docker. Real execution is refused unless all server
-guards pass.
+guards pass. Use the [server checklist](server-checklist.md) for host
+preflight and the exact execution commands.
+
+```mermaid
+flowchart LR
+    A["Laptop<br/>--plan · unit tests"] -->|"rsync repo"| B["V100 server<br/>RUNTIME_TARGET=gpu"]
+    B --> C["smoke → baseline"]
+    C --> D["one experiment axis at a time"]
+    D --> E{"evidence<br/>conclusive?"}
+    E -->|no| D
+    E -->|yes| F["re-run finalists,<br/>archive outputs/benchmarks/23.gpu-server-benchmark/"]
+    F -->|"bring back"| G["CPU comparison<br/>compare_cpu_gpu.py"]
+```
 
 ## Laptop workflow
 
@@ -31,7 +43,7 @@ tests, and importing the package never starts a container.
 Example transfer from the repository parent:
 
 ```bash
-rsync -az --exclude .venv --exclude outputs/benchmarks/gpu/ voight/ v100:/srv/voight/
+rsync -az --exclude .venv --exclude outputs/benchmarks/23.gpu-server-benchmark/ voight/ v100:/srv/voight/
 ```
 
 ```bash
@@ -76,11 +88,27 @@ preprocessing; Run 9 request concurrency; Run 10 final combined candidates;
 Run 11 a longer stability/final validation run. Stop after any run and choose
 the next axis from measured evidence.
 
+| Run | Axis | Values used last |
+|---:|---|---|
+| 0 | smoke | — |
+| 1 | GPU baseline | — |
+| 2 | localization/detection/recognition/MRZ batch sweeps | e.g. recognition 2,4,8,16,32,64 |
+| 3 | combined batch finalists | from run 2 evidence |
+| 4 | precision | fp32, fp16 |
+| 5 | backend | normal, hpi, tensorrt |
+| 6 | packing | fixed-width, aspect-ratio |
+| 7 | detector resolution | 100, 80, 60 |
+| 8 | visible/MRZ preprocessing | candidate set from CPU experiments |
+| 9 | request concurrency | 1, 2, 4, 8 |
+| 10 | final combined candidates | from runs 2–9 evidence |
+| 11 | stability / final validation | long run |
+
 Each configuration gets a fresh container, readiness verification, one warm-up,
 three or more measured repeats, medians/IQR/min/max, background `nvidia-smi`
 sampling, semantic digests, and cleanup verification. Raw diagnostics retain
 configured and actual tensor batches, detector shapes, crop/padding data where
 the server exposes it, and correctness fields from the API.
 
-Outputs are under `outputs/benchmarks/gpu/<UTC timestamp>/`. No GPU result is
-claimed until the server run is actually performed.
+**[PLANNED]** Outputs are under
+`outputs/benchmarks/23.gpu-server-benchmark/<UTC timestamp>/`. No GPU result
+is claimed until the server run is actually performed.

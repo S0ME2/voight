@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 import zipfile
 from contextlib import asynccontextmanager
@@ -156,14 +157,25 @@ def _run_batch(inputs: list[LogicalInput], models: Models, settings: Settings) -
         raise _error(ErrorCode.TOO_MANY_ITEMS, "Batch exceeds BATCH_MAX_FILES", 413)
     started = time.perf_counter()
     artifacts = create_batch_artifact_run(settings.artifacts, "v1")
+    artifacts.save_json(
+        "00_request.json",
+        {"inputs": [logical.input.model_dump(mode="json") for logical in inputs]},
+    )
+    planning_started = time.perf_counter()
     plan = build_batch_plan(inputs, settings, artifacts)
+    planning_seconds = time.perf_counter() - planning_started
     try:
         outcomes, diagnostics = models.profile_batch_runner().run(plan.jobs) if plan.jobs else ([], {})
     except QueueFullError as exc:
         raise _error(ErrorCode.QUEUE_FULL, str(exc), 503) from exc
     except ResourceExhaustedError as exc:
         raise _error(ErrorCode.RESOURCE_EXHAUSTED, str(exc), 503) from exc
-    return assemble_batch_response(inputs, plan, outcomes, diagnostics, started)
+    if os.getenv("VOIGHT_BENCHMARK_TRACE_DIR"):
+        diagnostics["benchmark_input_preparation_seconds"] = planning_seconds
+    response = assemble_batch_response(inputs, plan, outcomes, diagnostics, started)
+    artifacts.save_json("01_pipeline_diagnostics.json", response.diagnostics)
+    artifacts.save_json("02_response.json", response.model_dump(mode="json"))
+    return response
 
 
 def create_v1_router(settings: Settings, models: Models) -> APIRouter:
@@ -176,43 +188,43 @@ def create_v1_router(settings: Settings, models: Models) -> APIRouter:
         except QueueFullError as exc:
             raise _error(ErrorCode.QUEUE_FULL, str(exc), 503) from exc
 
-    @router.post("/ocr/passport", response_model=OcrResponse)
+    @router.post("/ocr/passport", response_model=OcrResponse, tags=["v1 OCR"])
     async def passport(image: UploadFile = File(...)) -> OcrResponse:
         return _single(await run(_image_inputs(DocumentType.PASSPORT, [await _read(image, settings)])))
 
-    @router.post("/ocr/id-card", response_model=OcrResponse)
+    @router.post("/ocr/id-card", response_model=OcrResponse, tags=["v1 OCR"])
     async def id_card(front: UploadFile = File(...), back: UploadFile = File(...)) -> OcrResponse:
         files = (await _read(front, settings), await _read(back, settings))
         response = await run([LogicalInput(DocumentInput(document_type=DocumentType.ID_CARD, front=files[0].filename or "front", back=files[1].filename or "back"), files)])
         return _single(response)
 
-    @router.post("/ocr/driving-license", response_model=OcrResponse)
+    @router.post("/ocr/driving-license", response_model=OcrResponse, tags=["v1 OCR"])
     async def driving_license(image: UploadFile = File(...)) -> OcrResponse:
         return _single(await run(_image_inputs(DocumentType.DRIVING_LICENSE, [await _read(image, settings)])))
 
-    @router.post("/ocr/passport/batch", response_model=OcrBatchResponse)
+    @router.post("/ocr/passport/batch", response_model=OcrBatchResponse, tags=["v1 OCR"])
     async def passport_batch(images: BatchUploads = [], archive: OptionalUpload = None) -> OcrBatchResponse:
         files = [await _read(file, settings) for file in images]
         if archive is not None:
             files.extend(_safe_entries(await _read(archive, settings), settings))
         return await run(_image_inputs(DocumentType.PASSPORT, files))
 
-    @router.post("/ocr/id-card/batch", response_model=OcrBatchResponse)
+    @router.post("/ocr/id-card/batch", response_model=OcrBatchResponse, tags=["v1 OCR"])
     async def id_card_batch(archive: UploadFile = File(...)) -> OcrBatchResponse:
         return await run(_id_archive(await _read(archive, settings), settings))
 
-    @router.post("/ocr/driving-license/batch", response_model=OcrBatchResponse)
+    @router.post("/ocr/driving-license/batch", response_model=OcrBatchResponse, tags=["v1 OCR"])
     async def driving_license_batch(images: BatchUploads = [], archive: OptionalUpload = None) -> OcrBatchResponse:
         files = [await _read(file, settings) for file in images]
         if archive is not None:
             files.extend(_safe_entries(await _read(archive, settings), settings))
         return await run(_image_inputs(DocumentType.DRIVING_LICENSE, files))
 
-    @router.get("/health/live")
+    @router.get("/health/live", tags=["Health"])
     async def live() -> dict[str, str]:
         return {"status": "live"}
 
-    @router.get("/health/ready")
+    @router.get("/health/ready", tags=["Health"])
     async def ready() -> dict:
         try:
             settings.validate_startup()

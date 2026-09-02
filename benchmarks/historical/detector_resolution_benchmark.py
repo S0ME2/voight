@@ -143,7 +143,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-root", type=Path, default=ROOT / "dataset")
     parser.add_argument("--model-dir", type=Path, default=ROOT / "models/benchmark")
-    parser.add_argument("--output-root", type=Path, default=ROOT / "outputs/benchmarks/detector_resolution")
+    parser.add_argument("--output-root", type=Path, default=ROOT / "outputs/benchmarks/13.detector-resolution-workload")
     parser.add_argument("--port", type=int, default=8010)
     parser.add_argument("--timeout", type=float, default=900)
     parser.add_argument("--repeats", type=int, default=3)

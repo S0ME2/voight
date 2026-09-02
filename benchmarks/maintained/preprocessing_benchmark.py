@@ -215,12 +215,12 @@ def build_fixed_crops(settings: Settings, documents: list[Any], models: Models, 
         "recognition_crops": [{"key": crop.key, "document_id": crop.document_id, "document_type": crop.document_type, "role": crop.role, "field": crop.field, "expected": crop.expected, "shape": list(crop.image.shape), "sha256": _sha(crop.image), **({"source_image_sha256": mrz_source_hashes[crop.document_id]} if crop.role == "mrz" else {})} for crop in crops],
         "baseline_boxes": baseline_boxes,
     }
-    (output / "fixed_crops").mkdir(parents=True, exist_ok=True)
-    (output / "fixed_crops" / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    (output / "01.fixed-crops").mkdir(parents=True, exist_ok=True)
+    (output / "01.fixed-crops" / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     for crop in crops:
-        np.save(output / "fixed_crops" / f"{crop.key.replace(':', '__')}.npy", crop.image)
+        np.save(output / "01.fixed-crops" / f"{crop.key.replace(':', '__')}.npy", crop.image)
     for item in detector_inputs:
-        np.save(output / "fixed_crops" / f"input__{item.key.replace(':', '__')}.npy", item.image)
+        np.save(output / "01.fixed-crops" / f"input__{item.key.replace(':', '__')}.npy", item.image)
     return crops, detector_inputs, manifest
 
 
@@ -307,7 +307,7 @@ def _box_match(left: np.ndarray, right: np.ndarray) -> bool:
 
 
 def run_detector_phase(documents: list[Any], inputs: list[DetectorInput], detector: Any, recognizer: Any, crops: list[Crop], repeats: int, output: Path) -> list[dict[str, Any]]:
-    baseline = {item.key: [np.asarray(value) for value in json.loads((output / "fixed_crops" / "manifest.json").read_text())["baseline_boxes"].get(item.key, [])] for item in inputs}
+    baseline = {item.key: [np.asarray(value) for value in json.loads((output / "01.fixed-crops" / "manifest.json").read_text())["baseline_boxes"].get(item.key, [])] for item in inputs}
     rows = []
     baseline_outputs = None
     for variant in ("original", "grayscale", "contrast_1.25", "clahe_mild", "gamma_0.8", "gamma_1.2"):
@@ -353,7 +353,7 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 def load_fixed_crops(settings: Settings, documents: list[Any], source: Path) -> tuple[list[Crop], list[DetectorInput], dict[str, Any]]:
-    fixed = source / "fixed_crops"
+    fixed = source / "01.fixed-crops"
     manifest = json.loads((fixed / "manifest.json").read_text(encoding="utf-8"))
     rois = {}
     for kind, profile_path in (("passport", settings.profiles.passport), ("id_card", settings.profiles.id_card)):
@@ -416,10 +416,10 @@ def write_full_pipeline_report(output: Path, documents: list[Any]) -> None:
             rows.append({"candidate": candidate, "document_type": kind, "repeats": len(selected), "e2e_seconds_median": statistics.median(row["client_e2e_seconds"] for row in selected), "docs_per_second_median": statistics.median(row["docs_per_second"] for row in selected), "rss_mb_max": max(row.get("rss_mb") or 0 for row in selected), "field_exact_rate": statistics.median(row["correctness"]["field_correctness"] or 0 for row in selected), "field_character_accuracy": statistics.median(row["correctness"]["field_character_accuracy"] or 0 for row in selected), "mrz_exact_rate": statistics.median(row["correctness"]["mrz_exact_match_rate"] or 0 for row in selected), "mrz_character_accuracy": statistics.median(row["correctness"]["mrz_character_accuracy"] or 0 for row in selected), **{f"stage_{name}_seconds": statistics.median(row["stage_timings"].get(name, 0) for row in selected) for name in ("localization", "pipeline", "text_detection", "text_recognition", "mrz_recognition")}})
     write_csv(output / "full_pipeline_finalists.csv", rows)
     finalists = json.loads((output / "finalists.json").read_text(encoding="utf-8"))["candidates"]
-    baseline_dir = output / "full_pipeline" / "00_baseline"
+    baseline_dir = output / "full_pipeline" / "01.baseline"
     differences = {}
     for index, candidate in enumerate(finalists):
-        candidate_dir = output / "full_pipeline" / f"{index:02d}_{candidate['name']}"
+        candidate_dir = output / "full_pipeline" / f"{index:02d}.{candidate['name'].replace('_', '-')}"
         for kind in DOC_TYPES:
             base_path = baseline_dir / f"{kind}_1.json"; candidate_path = candidate_dir / f"{kind}_1.json"
             if not base_path.is_file() or not candidate_path.is_file(): continue
@@ -476,7 +476,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-root", type=Path, default=ROOT / "dataset")
     parser.add_argument("--model-dir", type=Path, default=ROOT / "models/benchmark")
-    parser.add_argument("--output-root", type=Path, default=ROOT / "outputs/benchmarks/preprocessing")
+    # [PLANNED] Created only when the preprocessing sweep is executed.
+    parser.add_argument("--output-root", type=Path, default=ROOT / "outputs/benchmarks/15.preprocessing-candidate-sweep")
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--timeout", type=float, default=900)
     parser.add_argument("--port", type=int, default=8021)
@@ -528,12 +529,12 @@ def main() -> int:
         return 0
     if args.reuse_output:
         crops, detector_inputs, fixed_manifest = load_fixed_crops(settings, documents, args.reuse_output)
-        (output / "fixed_crops").mkdir(parents=True, exist_ok=True)
-        (output / "fixed_crops" / "manifest.json").write_text(json.dumps(fixed_manifest, indent=2), encoding="utf-8")
+        (output / "01.fixed-crops").mkdir(parents=True, exist_ok=True)
+        (output / "01.fixed-crops" / "manifest.json").write_text(json.dumps(fixed_manifest, indent=2), encoding="utf-8")
         for crop in crops:
-            np.save(output / "fixed_crops" / f"{crop.key.replace(':', '__')}.npy", crop.image)
+            np.save(output / "01.fixed-crops" / f"{crop.key.replace(':', '__')}.npy", crop.image)
         for item in detector_inputs:
-            np.save(output / "fixed_crops" / f"input__{item.key.replace(':', '__')}.npy", item.image)
+            np.save(output / "01.fixed-crops" / f"input__{item.key.replace(':', '__')}.npy", item.image)
     else:
         crops, detector_inputs, fixed_manifest = build_fixed_crops(settings, documents, models, output)
     recognizer = models.text_recognizer(); detector = models.text_detector()

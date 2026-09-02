@@ -68,7 +68,7 @@ def _args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-root", type=Path, default=ROOT / "dataset")
     parser.add_argument("--model-dir", type=Path, default=Path(os.getenv("MODEL_DIR", ".paddlex")))
-    parser.add_argument("--output-root", type=Path, default=ROOT / "outputs/benchmarks/model_matrix")
+    parser.add_argument("--output-root", type=Path, default=ROOT / "outputs/benchmarks/06.model-matrix-comparison")
     parser.add_argument("--port", type=int, default=8011)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--warmup", type=int, default=1)
@@ -384,7 +384,7 @@ def main() -> int:
             if not all((model_path / file).is_file() and (model_path / file).stat().st_size for file in ("inference.yml", "inference.json", "inference.pdiparams")):
                 raise RuntimeError(f"prepared model missing before {candidate.model}: {model_path}")
         _verify_auxiliary_cache(candidate)
-        candidate_dir = output / f"{index:02d}_{candidate.category}_{candidate.model.replace('/', '_').replace(' ', '_').replace('+', 'plus') }"
+        candidate_dir = output / f"{index:02d}.{candidate.category}-{candidate.model.replace('/', '-').replace(' ', '-').replace('_', '-').replace('+', 'plus') }"
         candidate_dir.mkdir(parents=True, exist_ok=True)
         server = Server(args, candidate_dir, candidate.env)
         memory_before = _available_memory()
@@ -401,7 +401,7 @@ def main() -> int:
             for repeat in range(1, args.repeats + 1):
                 started = time.perf_counter()
                 payloads, elapsed = [], 0.0
-                repeat_dir = candidate_dir / "raw" / f"repeat-{repeat}"
+                repeat_dir = candidate_dir / "raw" / f"{repeat:02d}.repeat-{repeat}"
                 repeat_dir.mkdir(parents=True, exist_ok=True)
                 repeat_scores = []
                 for kind, docs in by_kind.items():

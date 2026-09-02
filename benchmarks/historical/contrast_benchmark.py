@@ -624,7 +624,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("./outputs/benchmarks/contrast"),
+        default=Path("./outputs/benchmarks/02.contrast-sweep"),
     )
 
     parser.add_argument(

@@ -28,6 +28,7 @@ class Models:
         self._text_recognizer: Any | None = None
         self._process_text_recognizer: Any | None = None
         self._profile_batch_runner: Any | None = None
+        self._verification_ocr: Any | None = None
         self._mrz_scanner: Any | None = None
         self._mrz_recognition_scanner: Any | None = None
         self._mrz_recognizer: Any | None = None
@@ -48,6 +49,20 @@ class Models:
             current = loader()
             self._load_seconds[name] = time.perf_counter() - started
             setattr(self, attribute, current)
+            trace_dir = os.getenv("VOIGHT_BENCHMARK_TRACE_DIR")
+            if trace_dir:
+                try:
+                    import json
+                    from pathlib import Path
+
+                    target = Path(trace_dir)
+                    target.mkdir(parents=True, exist_ok=True)
+                    (target / f"model-load-{os.getpid()}-{name}-{time.time_ns()}.json").write_text(
+                        json.dumps({"model": name, "seconds": self._load_seconds[name]}),
+                        encoding="utf-8",
+                    )
+                except OSError:
+                    pass
         return current
 
     def mrz_scanner(self) -> Any:
@@ -167,6 +182,33 @@ class Models:
                 max_items=self.settings.batch.max_files * 2,
             )
         return self._profile_batch_runner
+
+    def verification_ocr(self) -> Any:
+        """Return whole-image OCR while sharing the process-owned text models."""
+        if self._verification_ocr is None:
+            from app.inference.batch import BatchedOcr
+            from app.inference.packing import recognition_batch_packer
+
+            runtime = self.settings.runtime
+            verification = self.settings.verification
+            if verification is None:
+                from app.config import VerificationBatchSettings
+
+                verification = VerificationBatchSettings(
+                    runtime.text_detection_batch_size,
+                    runtime.text_recognition_batch_size,
+                )
+            self._verification_ocr = BatchedOcr(
+                self.text_detector(),
+                self.process_text_recognizer() if runtime.text_recognition_processes > 1 else self.text_recognizer(),
+                detection_batch_size=verification.text_detection_batch_size,
+                recognition_batch_size=verification.text_recognition_batch_size,
+                mrz_recognition_batch_size=runtime.mrz_recognition_batch_size,
+                recognition_packer=recognition_batch_packer(runtime.text_recognition_packing),
+                detector_preprocessing=runtime.text_detector_preprocessing,
+                visible_preprocessing=runtime.visible_recognition_preprocessing,
+            )
+        return self._verification_ocr
 
     def document_aligner(self) -> Any:
         def load() -> Any:
@@ -331,6 +373,10 @@ class Models:
                 "detection": self.settings.runtime.text_detection_batch_size,
                 "recognition": self.settings.runtime.text_recognition_batch_size,
                 "mrz_recognition": self.settings.runtime.mrz_recognition_batch_size,
+            },
+            "verification_batch": {
+                "detection": (self.settings.verification or self.settings.runtime).text_detection_batch_size,
+                "recognition": (self.settings.verification or self.settings.runtime).text_recognition_batch_size,
             },
             "recognition_packing": self.settings.runtime.text_recognition_packing,
             "recognition_acceleration": {

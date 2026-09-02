@@ -55,7 +55,7 @@ def args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-root", type=Path, default=ROOT / "dataset")
     parser.add_argument("--model-dir", type=Path, default=Path(os.getenv("MODEL_DIR", "models/benchmark")))
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "outputs/benchmarks/recognizer_ab")
+    parser.add_argument("--output-dir", type=Path, default=ROOT / "outputs/benchmarks/10.recognizer-a-b-comparison")
     parser.add_argument("--port", type=int, default=8015)
     parser.add_argument("--timeout", type=float, default=900)
     return parser.parse_args()

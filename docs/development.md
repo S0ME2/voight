@@ -6,10 +6,13 @@ Python 3.12 and `uv` are required:
 
 ```bash
 make install
-make test
 make check
-make run-dev
+make run
 ```
+
+`make run` starts the local CPU API on port `8888` by default. Use
+`make run-dev` only when auto-reload is wanted. Tests and checks are CPU-only;
+never install, import-test, build, or execute the GPU dependency set locally.
 
 The local run targets deliberately ignore Docker's `/opt/voight/models` path
 and let the pinned libraries use the current user's cache. Docker remains the

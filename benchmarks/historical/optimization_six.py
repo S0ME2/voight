@@ -66,7 +66,7 @@ def _write(directory: Path, settings: Settings, manifest: dict, documents: list[
 
 def experiment_one() -> int:
     documents, manifest = validate_and_manifest(ROOT / "dataset")
-    directory = OUTPUT / "01_recognition_batch"
+    directory = OUTPUT / "02.recognition-batch"
     variants = {
         "passport": "passport_visible_no_mrz_ocr",
         "id_card": "id_card_visible_known_side",
@@ -144,14 +144,14 @@ def experiment_two() -> int:
         for mode in ("CURRENT_COMBINED", "SPLIT_SAME_BATCH", "SPLIT_TUNED_BATCH"):
             value = stats(r.total_seconds for r in runs if r.document_type == kind and r.variant == mode)["median"]
             lines.append(f"| {kind} | {mode} | {value:.3f} |")
-    _write(OUTPUT / "02_split_visible_mrz", settings, manifest, documents, runs, "\n".join(lines) + "\n")
+    _write(OUTPUT / "03.split-visible-mrz", settings, manifest, documents, runs, "\n".join(lines) + "\n")
     print("Experiment 2 complete")
     return 0
 
 
 def experiment_three() -> int:
     documents, manifest = validate_and_manifest(ROOT / "dataset")
-    directory = OUTPUT / "03_recognizer_models"
+    directory = OUTPUT / "04.recognizer-models"
     directory.mkdir(parents=True, exist_ok=True)
     models = ("PP-OCRv6_medium_rec", "PP-OCRv6_small_rec", "PP-OCRv6_tiny_rec", "latin_PP-OCRv5_mobile_rec", "PP-OCRv5_mobile_rec", "en_PP-OCRv5_mobile_rec")
     rows = []
@@ -181,7 +181,7 @@ def experiment_three() -> int:
 
 
 def experiment_four() -> int:
-    directory = OUTPUT / "04_cpu_runtime"; directory.mkdir(parents=True, exist_ok=True)
+    directory = OUTPUT / "05.cpu-runtime"; directory.mkdir(parents=True, exist_ok=True)
     image = cv2.imread(str(ROOT / "dataset/passport/p_1.png"))
     crop = cv2.resize(image, (320, 64))
     rows = []
@@ -224,7 +224,7 @@ def fixed_rows(image, count: int):
 
 def experiment_five() -> int:
     documents, manifest = validate_and_manifest(ROOT / "dataset")
-    directory = OUTPUT / "05_mrz_rows"; directory.mkdir(parents=True, exist_ok=True)
+    directory = OUTPUT / "06.mrz-rows"; directory.mkdir(parents=True, exist_ok=True)
     settings = _settings(8); models = Models(settings); rows = []
     for kind, variant, count, role in (("passport", "passport_mrz_only", 2, "image"), ("id_card", "id_card_mrz_known_back", 3, "back")):
         corpus = [d for d in documents if d.document_type == kind]
@@ -254,7 +254,7 @@ def experiment_five() -> int:
 
 def experiment_six() -> int:
     documents, manifest = validate_and_manifest(ROOT / "dataset")
-    directory = OUTPUT / "06_fast_fallback"; directory.mkdir(parents=True, exist_ok=True)
+    directory = OUTPUT / "07.fast-fallback"; directory.mkdir(parents=True, exist_ok=True)
     base = _settings(8); fast_settings = replace(base, models=replace(base.models, text_recognizer=TextModelSettings("paddle", "PP-OCRv6_tiny_rec")))
     medium = Models(base); fast = Models(fast_settings); rows = []
     for kind, variant, count, role in (("passport", "passport_mrz_only", 2, "image"), ("id_card", "id_card_mrz_known_back", 3, "back")):
@@ -290,7 +290,7 @@ def experiment_six() -> int:
 
 def final_integration() -> int:
     documents, manifest = validate_and_manifest(ROOT / "dataset")
-    directory = OUTPUT / "99_final"; directory.mkdir(parents=True, exist_ok=True)
+    directory = OUTPUT / "08.final-result"; directory.mkdir(parents=True, exist_ok=True)
     safe = _settings(8); fast = replace(safe, models=replace(safe.models, text_recognizer=TextModelSettings("paddle", "PP-OCRv6_tiny_rec")))
     rows = []
     for label, settings in (("SAFE_OBSERVED", safe), ("FASTEST_EXPERIMENTAL", fast)):
