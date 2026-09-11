@@ -1,7 +1,4 @@
 # Server-only GPU runtime. Keep this file separate from cpu.lock; do not
 # install it in the local development environment.
---find-links https://www.paddlepaddle.org.cn/packages/stable/cu118/
--r common.txt
--r models.txt
-onnxruntime-gpu==1.22.0
-paddlepaddle-gpu==3.2.2
+# Docker installs the full pinned closure without dependency resolution.
+-r gpu.lock

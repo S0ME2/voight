@@ -112,19 +112,26 @@ def driving_field_results(values: dict[str, Any], report: dict[str, Any]) -> dic
 
 
 def build_batch_plan(
-    inputs: list[LogicalInput], settings: Settings, artifacts: ArtifactWriter
+    inputs: list[LogicalInput], settings: Settings, artifacts: ArtifactWriter,
+    timings: dict[str, int] | None = None,
 ) -> BatchPlan:
     jobs: list[ProfileBatchItem] = []
     owners: list[BatchOwner] = []
     item_errors: dict[int, ErrorResult] = {}
     for index, logical in enumerate(inputs):
         try:
+            decode_started = time.perf_counter_ns()
             decoded_files = tuple(image_from_document(file) for file in logical.files)
+            if timings is not None:
+                timings["plan.image_decode_ns"] = timings.get("plan.image_decode_ns", 0) + time.perf_counter_ns() - decode_started
         except HTTPException:
             item_errors[index] = ErrorResult(code=ErrorCode.INVALID_UPLOAD, detail="Upload must be a decodable image")
             continue
         if logical.input.document_type == DocumentType.DRIVING_LICENSE:
+            profile_started = time.perf_counter_ns()
             profile = load_region_profile(settings.driving_license.data_crop, settings.driving_license.field_rois)
+            if timings is not None:
+                timings["plan.profile_load_ns"] = timings.get("plan.profile_load_ns", 0) + time.perf_counter_ns() - profile_started
             document_profile = None
             pipeline = None
             regions = [
@@ -140,7 +147,10 @@ def build_batch_plan(
             ]
         else:
             profile_path = settings.profiles.passport if logical.input.document_type == DocumentType.PASSPORT else settings.profiles.id_card
+            profile_started = time.perf_counter_ns()
             document_profile = load_document_profile(profile_path)
+            if timings is not None:
+                timings["plan.profile_load_ns"] = timings.get("plan.profile_load_ns", 0) + time.perf_counter_ns() - profile_started
             pipeline = identity_batch_pipeline(logical.input.document_type)
             regions = [
                 (
@@ -154,8 +164,9 @@ def build_batch_plan(
                 )
                 for region, file in zip(pipeline.regions, decoded_files)
             ]
-        for region, file, profile, width, height, parser, validator in regions:
+        for region, file, region_profile, width, height, parser, validator in regions:
             image = file.image
+            input_artifact_started = time.perf_counter_ns()
             writer = create_child_artifact_run(artifacts, len(jobs), file.filename)
             save_input(
                 writer,
@@ -167,11 +178,13 @@ def build_batch_plan(
                 source_filename=file.source_filename,
                 archive_path=file.archive_path,
             )
+            if timings is not None:
+                timings["plan.input_artifact_ns"] = timings.get("plan.input_artifact_ns", 0) + time.perf_counter_ns() - input_artifact_started
             jobs.append(
                 ProfileBatchItem(
                     item_id=f"{index}:{region}",
                     image=image,
-                    profile=profile,
+                    profile=region_profile,
                     localization_kind="docaligner" if pipeline is None else pipeline.localization_kind,
                     parse_fields=parser,
                     validate_fields=validator,

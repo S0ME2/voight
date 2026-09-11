@@ -35,6 +35,8 @@ make models-info
 No model volume or host `~/.paddlex` directory is used. Docker reuses the model
 layer while its inputs are unchanged. The first build requires internet access;
 an already-built image starts and serves requests without downloading models.
+The GPU image uses `requirements/gpu.lock` and the same prepared model layer;
+GPU/CUDA packages are never installed by local CPU commands.
 
 Remove the local image with `docker image rm voight:cpu`. Force dependency and
 weight downloads again with `make models-rebuild-cpu`. Docker may retain an

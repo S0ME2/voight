@@ -1,4 +1,6 @@
 import json
+import os
+import time
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -70,6 +72,12 @@ class ArtifactWriter:
     operation: str
     run_id: str
     enabled: bool
+    profile: dict[str, int] | None = None
+
+    def _record(self, name: str, started_ns: int) -> None:
+        if self.profile is not None:
+            self.profile[f"artifact.{name}_ns"] = self.profile.get(f"artifact.{name}_ns", 0) + time.perf_counter_ns() - started_ns
+            self.profile[f"artifact.{name}_count"] = self.profile.get(f"artifact.{name}_count", 0) + 1
 
     @property
     def directory(self) -> Path:
@@ -82,52 +90,67 @@ class ArtifactWriter:
 
     def save_bytes(self, name: str, data: bytes) -> None:
         if self.enabled:
+            started = time.perf_counter_ns()
             self.path(name).write_bytes(data)
+            self._record("bytes_write", started)
 
     def save_json(self, name: str, data: Any) -> None:
         if self.enabled:
-            self.path(name).write_text(
-                json.dumps(data, ensure_ascii=False, indent=2, default=json_default),
-                encoding="utf-8",
-            )
+            started = time.perf_counter_ns()
+            encoded = json.dumps(data, ensure_ascii=False, indent=2, default=json_default)
+            self._record("json_encode", started)
+            started = time.perf_counter_ns()
+            self.path(name).write_text(encoded, encoding="utf-8")
+            self._record("json_write", started)
 
     def save_text(self, name: str, text: str) -> None:
         if self.enabled:
+            started = time.perf_counter_ns()
             self.path(name).write_text(text, encoding="utf-8")
+            self._record("text_write", started)
 
     def save_image(self, name: str, image: np.ndarray) -> None:
         if self.enabled:
+            started = time.perf_counter_ns()
             cv2.imwrite(str(self.path(name)), image)
+            self._record("image_write", started)
 
     def save_model_image(self, name: str, result: Any) -> None:
         if self.enabled:
+            started = time.perf_counter_ns()
             result.save_to_img(str(self.path(name)))
+            self._record("model_image_write", started)
 
     def save_model_json(self, name: str, result: Any) -> None:
         if self.enabled:
+            started = time.perf_counter_ns()
             result.save_to_json(str(self.path(name)))
+            self._record("model_json_write", started)
 
 
 def create_artifact_run(
     settings: ArtifactSettings,
     operation: str,
     filename: str | None,
+    profile: dict[str, int] | None = None,
 ) -> ArtifactWriter:
     return ArtifactWriter(
         settings.directory,
         operation,
         new_run_id(settings.directory, operation, filename, settings.enabled),
         settings.enabled,
+        profile if profile is not None else ({} if os.getenv("VOIGHT_BENCHMARK_PROFILE") else None),
     )
 
 
 def create_batch_artifact_run(
     settings: ArtifactSettings,
     operation: str,
+    profile: dict[str, int] | None = None,
 ) -> ArtifactWriter:
     """Create one parent directory for an entire batch request."""
 
-    return create_artifact_run(settings, f"{operation}_batch", "batch")
+    return create_artifact_run(settings, f"{operation}_batch", "batch", profile)
 
 
 def create_child_artifact_run(
@@ -140,7 +163,7 @@ def create_child_artifact_run(
     run_id = f"{index + 1:03d}_{safe_filename(filename)}"
     if parent.enabled:
         (parent.directory / run_id).mkdir(parents=True, exist_ok=True)
-    return ArtifactWriter(parent.directory, "", run_id, parent.enabled)
+    return ArtifactWriter(parent.directory, "", run_id, parent.enabled, parent.profile)
 
 
 def save_input(

@@ -51,17 +51,19 @@ make run
 For the reproducible CPU container:
 
 ```bash
-cp .env.example .env
-make docker-cpu-build
-make docker-cpu-up-d
-curl --fail http://127.0.0.1:8000/v1/health/ready
+./setup.sh
+```
+
+`setup.sh` creates `.env` when absent, builds and tests the image, starts it in
+the background, and waits for readiness. The image uses pinned CPU Paddle and
+ONNX Runtime packages, runs one Uvicorn worker as the unprivileged `voight`
+user, exposes container port 8000, and has a readiness health check.
+`VOIGHT_PORT` controls the host port. Follow logs and stop it with:
+
+```bash
 make docker-cpu-logs
 make docker-cpu-down
 ```
-
-The image uses pinned CPU Paddle and ONNX Runtime packages, runs one Uvicorn
-worker as the unprivileged `voight` user, exposes container port 8000, and has a
-readiness health check. `VOIGHT_PORT` controls the host port. The
 `voight-artifacts` named volume persists `/app/logs` across container recreation.
 Use `make docker-cpu-artifacts-copy` before
 `make docker-cpu-artifacts-clean` when saved debugging output is needed.
@@ -86,18 +88,19 @@ default to `.env.example`; set `VOIGHT_ENV_FILE` when using a different file.
 
 ## GPU
 
-GPU commands are server-only. From the repository root, create `.env`, then
-set `RUNTIME_TARGET=gpu` and `GPU_ID` there:
+GPU commands are server-only. From the repository root, run the setup script on
+the server:
 
 ```bash
-cp .env.example .env
-make docker-gpu-build
-make docker-gpu-test
-make docker-gpu-up-d
+./setup.sh gpu
 ```
 
-The GPU target pins Paddle GPU for CUDA 11.8 and ONNX Runtime GPU, requests one
-NVIDIA GPU, keeps one application worker, and shares the production pipeline.
+The script checks Linux x86_64 and `nvidia-smi`, sets `RUNTIME_TARGET=gpu`, then
+builds/tests/starts the GPU target and waits for readiness. The GPU target uses
+the fully pinned `requirements/gpu.lock` closure, with Paddle GPU for CUDA 11.8
+and ONNX Runtime GPU's CUDA 12 libraries installed at fixed versions in the
+image. It requests one NVIDIA GPU, keeps one application worker, and shares the
+production pipeline.
 HPI, TensorRT, and FP16 remain disabled unless explicitly configured. GPU
 inference has not yet been verified on the target V100; see the limitation in
 the [root README](../README.md) and the [GPU benchmark checklist](../benchmarks/gpu/server-checklist.md).

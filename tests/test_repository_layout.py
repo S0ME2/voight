@@ -22,7 +22,9 @@ class RepositoryLayoutTests(unittest.TestCase):
     def test_onboarding_files_exist_and_legacy_paths_are_gone(self):
         required = {
             "README.md",
+            "setup.sh",
             ".env.example",
+            "docs/getting-started.md",
             "docs/architecture.md",
             "docs/api.md",
             "docs/configuration.md",
@@ -89,8 +91,10 @@ class RepositoryLayoutTests(unittest.TestCase):
         for package in ("docaligner-docsaid", "mrzscanner-docsaid", "onnxruntime"):
             self.assertRegex(cpu_lock, rf"(?m)^{re.escape(package)}==")
         self.assertNotRegex(cpu_lock, r"(?m)^(onnxruntime-gpu|paddlepaddle-gpu)==")
-        self.assertIn("onnxruntime-gpu==1.22.0", gpu_requirements)
-        self.assertIn("paddlepaddle-gpu==3.2.2", gpu_requirements)
+        gpu_lock = (ROOT / "requirements" / "gpu.lock").read_text(encoding="utf-8")
+        self.assertRegex(gpu_lock, r"(?m)^onnxruntime-gpu==1\.22\.0")
+        self.assertIn("paddlepaddle_gpu-3.2.2", gpu_lock)
+        self.assertIn("-r gpu.lock", gpu_requirements)
 
     def test_tracked_project_text_has_no_developer_absolute_paths(self):
         offenders = []

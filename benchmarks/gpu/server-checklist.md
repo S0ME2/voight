@@ -30,6 +30,26 @@ uv run --no-sync python benchmarks/gpu/gpu_benchmark.py --execute --mode smoke -
 uv run --no-sync python benchmarks/gpu/gpu_benchmark.py --execute --mode baseline --port 8090
 ```
 
+For the route-level 1003 recreation, create a separate env file before
+starting Compose so application profiling is enabled inside the container:
+
+```bash
+cp .env.example .env.v100-benchmark
+sed -i -e 's/^RUNTIME_TARGET=.*/RUNTIME_TARGET=gpu/' \
+       -e 's/^LOGGING=.*/LOGGING=false/' \
+       -e 's/^BATCH_MAX_FILES=.*/BATCH_MAX_FILES=64/' \
+       .env.v100-benchmark
+printf 'VOIGHT_BENCHMARK_PROFILE=true\n' >> .env.v100-benchmark
+ENV_FILE=.env.v100-benchmark ./setup.sh gpu
+```
+
+Then run the two routes from the repository root:
+
+```bash
+uv run --no-sync python benchmarks/maintained/profile_other_benchmark.py --route full-latin-pipeline --base-url http://127.0.0.1:8000 --dataset-root dataset --sizes 1 2 4 7 8 9 16 32 64 --repeats 3 --output outputs/benchmarks/1003.full-latin-pipeline/profile.json
+uv run --no-sync python benchmarks/maintained/profile_other_benchmark.py --route comparison --base-url http://127.0.0.1:8000 --dataset-root dataset --sizes 1 2 4 7 8 9 16 32 64 --repeats 3 --output outputs/benchmarks/1003.comparison-routes/profile.json
+```
+
 Selected sweeps:
 
 ```bash

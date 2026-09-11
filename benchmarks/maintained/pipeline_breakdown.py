@@ -12,6 +12,7 @@ import argparse
 import csv
 import gc
 import hashlib
+import importlib.metadata
 import json
 import os
 import platform
@@ -273,6 +274,17 @@ def _settings() -> Settings:
 
 
 def environment(settings: Settings, manifest: dict[str, Any], started: str) -> dict[str, Any]:
+    def text_output(value: str | bytes) -> str:
+        return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
+
+    def distribution_version(*names: str) -> str | None:
+        for name in names:
+            try:
+                return importlib.metadata.version(name)
+            except importlib.metadata.PackageNotFoundError:
+                continue
+        return None
+
     try:
         affinity = sorted(os.sched_getaffinity(0))
     except AttributeError:
@@ -284,20 +296,19 @@ def environment(settings: Settings, manifest: dict[str, Any], started: str) -> d
                 cpu["model"] = line.split(":", 1)[1].strip(); break
     except OSError:
         pass
-    versions = {}
-    for name in ("paddle", "paddleocr", "onnxruntime", "cv2"):
-        try:
-            module = __import__(name)
-            versions[name] = getattr(module, "__version__", "unknown")
-        except ImportError:
-            versions[name] = None
+    versions = {
+        "paddle": distribution_version("paddlepaddle", "paddlepaddle-gpu"),
+        "paddleocr": distribution_version("paddleocr"),
+        "onnxruntime": distribution_version("onnxruntime", "onnxruntime-gpu"),
+        "cv2": distribution_version("opencv-python-headless", "opencv-python"),
+    }
     physical = None
     try:
-        lines = subprocess.check_output(["lscpu", "-p=CPU,CORE,SOCKET"], text=True).splitlines()
+        lines = text_output(subprocess.check_output(["lscpu", "-p=CPU,CORE,SOCKET"], text=True)).splitlines()
         physical = len({tuple(line.split(",")[1:3]) for line in lines if line and not line.startswith("#")})
     except (OSError, subprocess.SubprocessError):
         pass
-    return {"git_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(), "git_dirty": bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip()), "os": platform.platform(), "kernel": platform.release(), "python": sys.version, "packages": versions, "cpu": {**cpu, "physical_cores": physical, "logical_cpus": os.cpu_count(), "affinity": affinity}, "runtime": {"target": settings.runtime.target, "ocr_device": settings.ocr.device, "cpu_threads": settings.runtime.cpu_threads, "localization_batch_size": settings.runtime.localization_batch_size, "text_detection_batch_size": settings.runtime.text_detection_batch_size, "text_recognition_batch_size": settings.runtime.text_recognition_batch_size, "mrz_recognition_batch_size": settings.runtime.mrz_recognition_batch_size, "recognition_packing": settings.runtime.text_recognition_packing}, "models": {"detector": settings.models.text_detector.model, "recognizer": settings.models.text_recognizer.model, "docaligner": settings.driving_license.aligner_model, "mrz_backend": settings.models.mrz.recognizer_backend, "mrz_model": settings.models.mrz.recognizer_model}, "preprocessing": {"ocr_predict_config": {"text_det_thresh": 0.30, "text_det_box_thresh": 0.50, "text_det_unclip_ratio": 2.0}, "ocr_max_side": settings.mrz.max_side, "ocr_contrast": settings.mrz.contrast, "mrz_polygon_padding_ratio": settings.mrz.polygon_padding_ratio}, "artifacts_enabled": settings.artifacts.enabled, "benchmark_started_utc": started, "manifest_counts": manifest["counts"]}
+    return {"git_commit": text_output(subprocess.check_output(["git", "rev-parse", "HEAD"], text=True)).strip(), "git_dirty": bool(text_output(subprocess.check_output(["git", "status", "--porcelain"], text=True)).strip()), "os": platform.platform(), "kernel": platform.release(), "python": sys.version, "packages": versions, "cpu": {**cpu, "physical_cores": physical, "logical_cpus": os.cpu_count(), "affinity": affinity}, "runtime": {"target": settings.runtime.target, "ocr_device": settings.ocr.device, "cpu_threads": settings.runtime.cpu_threads, "localization_batch_size": settings.runtime.localization_batch_size, "text_detection_batch_size": settings.runtime.text_detection_batch_size, "text_recognition_batch_size": settings.runtime.text_recognition_batch_size, "mrz_recognition_batch_size": settings.runtime.mrz_recognition_batch_size, "recognition_packing": settings.runtime.text_recognition_packing}, "models": {"detector": settings.models.text_detector.model, "recognizer": settings.models.text_recognizer.model, "docaligner": settings.driving_license.aligner_model, "mrz_backend": settings.models.mrz.recognizer_backend, "mrz_model": settings.models.mrz.recognizer_model}, "preprocessing": {"ocr_predict_config": {"text_det_thresh": 0.30, "text_det_box_thresh": 0.50, "text_det_unclip_ratio": 2.0}, "ocr_max_side": settings.mrz.max_side, "ocr_contrast": settings.mrz.contrast, "mrz_polygon_padding_ratio": settings.mrz.polygon_padding_ratio}, "artifacts_enabled": settings.artifacts.enabled, "benchmark_started_utc": started, "manifest_counts": manifest["counts"]}
 
 
 def _read_images(document: Document) -> dict[str, np.ndarray]:
