@@ -12,6 +12,7 @@ import argparse
 import csv
 import gc
 import hashlib
+import importlib.metadata
 import json
 import os
 import platform
@@ -276,6 +277,14 @@ def environment(settings: Settings, manifest: dict[str, Any], started: str) -> d
     def text_output(value: str | bytes) -> str:
         return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
 
+    def distribution_version(*names: str) -> str | None:
+        for name in names:
+            try:
+                return importlib.metadata.version(name)
+            except importlib.metadata.PackageNotFoundError:
+                continue
+        return None
+
     try:
         affinity = sorted(os.sched_getaffinity(0))
     except AttributeError:
@@ -288,12 +297,10 @@ def environment(settings: Settings, manifest: dict[str, Any], started: str) -> d
     except OSError:
         pass
     versions = {}
-    for name in ("paddle", "paddleocr", "onnxruntime", "cv2"):
-        try:
-            module = __import__(name)
-            versions[name] = getattr(module, "__version__", "unknown")
-        except ImportError:
-            versions[name] = None
+    versions["paddle"] = distribution_version("paddlepaddle", "paddlepaddle-gpu")
+    versions["paddleocr"] = distribution_version("paddleocr")
+    versions["onnxruntime"] = distribution_version("onnxruntime", "onnxruntime-gpu")
+    versions["cv2"] = distribution_version("opencv-python-headless", "opencv-python")
     physical = None
     try:
         lines = text_output(subprocess.check_output(["lscpu", "-p=CPU,CORE,SOCKET"], text=True)).splitlines()

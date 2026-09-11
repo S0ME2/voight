@@ -63,6 +63,37 @@ class PipelineBreakdownTests(unittest.TestCase):
             value = environment(settings, {"counts": {}}, "now")
         self.assertEqual(value["cpu"]["physical_cores"], 3)
 
+    def test_environment_reads_versions_without_importing_heavy_packages(self):
+        from importlib.metadata import PackageNotFoundError
+        from benchmarks.maintained.pipeline_breakdown import environment
+
+        settings = Settings.from_env()
+        payload = "# CPU,Core,Socket\n0,0,0\n"
+        versions = {
+            "paddlepaddle": "3.1.0",
+            "paddleocr": "2.10.0",
+            "onnxruntime": "1.22.0",
+        }
+
+        def fake_version(name: str) -> str:
+            if name == "opencv-python-headless":
+                raise PackageNotFoundError(name)
+            if name == "opencv-python":
+                return "4.12.0"
+            if name in versions:
+                return versions[name]
+            raise PackageNotFoundError(name)
+
+        with (
+            patch("benchmarks.maintained.pipeline_breakdown.importlib.metadata.version", side_effect=fake_version),
+            patch("benchmarks.maintained.pipeline_breakdown.subprocess.check_output", side_effect=lambda command, **kwargs: payload if command[:2] == ["lscpu", "-p=CPU,CORE,SOCKET"] else "commit\n"),
+        ):
+            value = environment(settings, {"counts": {}}, "now")
+        self.assertEqual(
+            value["packages"],
+            {"paddle": "3.1.0", "paddleocr": "2.10.0", "onnxruntime": "1.22.0", "cv2": "4.12.0"},
+        )
+
     def test_scaling_order_cycles_deterministically_and_counts_id_sides(self):
         docs = [
             Document("id_card", "id_1", (("front", Path("f")), ("back", Path("b"))), Path("a")),

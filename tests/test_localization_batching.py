@@ -83,12 +83,13 @@ class LocalizationBatchTests(unittest.TestCase):
         with patch.dict(os.environ, {"RUNTIME_TARGET": "cpu", "OCR_DEVICE": "cpu"}, clear=True):
             try:
                 models = Models(Settings.from_env())
+                adapters = (models.document_localizer(), models.mrz_localizer())
             except RuntimeError as exc:
                 if "turbojpeg" not in str(exc).lower():
                     raise
                 self.skipTest(str(exc))
         images = [np.zeros((64, 96, 3), np.uint8), np.full((80, 60, 3), 20, np.uint8)]
-        for adapter in (models.document_localizer(), models.mrz_localizer()):
+        for adapter in adapters:
             self.assertEqual(["CPUExecutionProvider"], adapter.providers)
             spy = EngineSpy(adapter.engine)
             adapter.engine = spy
