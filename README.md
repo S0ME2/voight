@@ -11,6 +11,14 @@ The project is deliberately layout-specific. One supplied example exists for
 the passport and ID card, so the profiles are a maintainable implementation for
 those layouts—not a claim of general identity-document accuracy.
 
+## Start here
+
+New contributors and operators should follow
+[`docs/getting-started.md`](docs/getting-started.md). It has the shortest
+clone-to-running-service path for CPU Docker, local CPU development, and the
+server-only GPU deployment. The CPU Docker path is the recommended first run
+because it provisions the pinned models without requiring a host model cache.
+
 ## Choose the operation
 
 There are three different operations. Pick the one that matches the data you
@@ -240,7 +248,7 @@ Actual configured and submitted tensor batch sizes are available in diagnostics.
 |---|---|---|---|
 | Local CPU | Linux x86_64, Python 3.12, `uv` | `make install`, `make run` | Validated |
 | CPU Docker | Linux x86_64, Docker Engine, Compose v2 | `make docker-cpu-build`, `make docker-cpu-up-d` | Image build and readiness validated |
-| GPU Docker | Linux x86_64, NVIDIA Container Toolkit, designated Tesla V100 | `make docker-gpu-build`, `make docker-gpu-up-d` | Server-only; runtime not yet validated |
+| GPU Docker | Linux x86_64, NVIDIA Container Toolkit, designated Tesla V100 | `./setup.sh gpu` | Server-only; runtime not yet validated |
 
 The GPU target is not a generic GPU claim. Use it only on the designated
 Linux NVIDIA server described in [`benchmarks/gpu/server-checklist.md`](benchmarks/gpu/server-checklist.md).
@@ -254,14 +262,12 @@ Requirements: Docker with Compose v2 and internet access for the first build.
 ```bash
 git clone <repository-url> voight
 cd voight
-cp .env.example .env
-make docker-cpu-build
-make docker-cpu-up-d
-curl --fail http://127.0.0.1:8000/v1/health/ready
+./setup.sh
 ```
 
-The image contains the pinned CPU runtime and prepared model assets. It does
-not use a host model directory. Stop it with:
+`setup.sh` creates `.env`, builds and tests the CPU image, starts the service,
+and waits for `/v1/health/ready`. The image contains the pinned CPU runtime and
+prepared model assets; it does not use a host model directory. Stop it with:
 
 ```bash
 make docker-cpu-down
@@ -269,6 +275,12 @@ make docker-cpu-down
 
 Use [`docs/deployment.md`](docs/deployment.md) for Compose environment files,
 artifact storage, offline startup behavior, and the GPU server procedure.
+
+On the designated V100 server, run `./setup.sh gpu`. This is the only supported
+GPU setup path; it checks `nvidia-smi`, switches `.env` to `RUNTIME_TARGET=gpu`,
+builds/tests the GPU image, starts it, and waits for readiness. Amazon Nova or
+Bedrock is not part of this repository's runtime; the implementation uses the
+V100-oriented Paddle/ONNX GPU image.
 
 ## Develop locally
 
@@ -295,14 +307,14 @@ Usage:
 
   On the GPU server only:
 
-  make docker-gpu-build
-  make docker-gpu-up-d
+  ./setup.sh gpu
 ```
 
 Validation:
 
 - `make check` passed.
-- Full CPU suite: 178 passed, 2 skipped.
+- Full CPU suite: run `make test` for the current result; real-model checks skip
+  unless an explicit local model cache is available.
 - Dependency separation test passed.
 - No GPU packages were installed, imported, built, or executed.
 
@@ -328,6 +340,7 @@ workaround.
 
 ## Documentation
 
+- [`docs/getting-started.md`](docs/getting-started.md) — first-time setup for CPU Docker, local CPU, and GPU server
 - [`docs/api.md`](docs/api.md) — route contracts and examples
 - [`docs/architecture.md`](docs/architecture.md) — processing paths and model roles
 - [`docs/configuration.md`](docs/configuration.md) — environment settings

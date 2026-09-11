@@ -81,7 +81,12 @@ class LocalizationBatchTests(unittest.TestCase):
     @unittest.skipUnless(HAS_LOCALIZERS, "CPU localization wrappers are unavailable")
     def test_real_cpu_onnx_sessions_accept_n_greater_than_one(self):
         with patch.dict(os.environ, {"RUNTIME_TARGET": "cpu", "OCR_DEVICE": "cpu"}, clear=True):
-            models = Models(Settings.from_env())
+            try:
+                models = Models(Settings.from_env())
+            except RuntimeError as exc:
+                if "turbojpeg" not in str(exc).lower():
+                    raise
+                self.skipTest(str(exc))
         images = [np.zeros((64, 96, 3), np.uint8), np.full((80, 60, 3), 20, np.uint8)]
         for adapter in (models.document_localizer(), models.mrz_localizer()):
             self.assertEqual(["CPUExecutionProvider"], adapter.providers)

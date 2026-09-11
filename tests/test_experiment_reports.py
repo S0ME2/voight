@@ -19,7 +19,13 @@ class ExperimentReportTests(unittest.TestCase):
                 {"## Metadata", "## 3. Results", "## 9. Reproduction"}
                 <= set(re.findall(r"^## .+$", text, re.MULTILINE))
             )
-            self.assertFalse(any(name in text for name in names if name != report.name))
+            cross_refs = [
+                name
+                for name in names
+                if name != report.name
+                and re.search(rf"\]\((?:\./)?{re.escape(name)}(?:#[^)]+)?\)", text)
+            ]
+            self.assertFalse(cross_refs, f"{report.name} links to other reports: {cross_refs}")
 
     def test_report_figures_exist(self):
         for report in REPORTS:

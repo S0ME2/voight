@@ -1,0 +1,364 @@
+# Canonical GPU runtime lock.
+#
+# This file is intentionally maintained separately from uv.lock. Docker and
+# Docker installs it with --no-deps because capybara-docsaid declares
+# onnxruntime-gpu on Linux even when Voight selects its CPU backend. The model
+# adapters and their GPU-safe transitive closure are included below. The CUDA
+# 11.8 Paddle wheel and CUDA 12 ONNX libraries are pinned by URL or Dockerfile;
+# do not replace this with an unpinned GPU requirements file.
+aiohappyeyeballs==2.7.1
+    # via aiohttp
+aiohttp==3.14.1
+    # via paddleocr
+aiosignal==1.4.0
+    # via aiohttp
+aistudio-sdk==0.3.8
+    # via paddlex
+annotated-doc==0.0.4
+    # via fastapi
+annotated-types==0.7.0
+    # via pydantic
+anyio==4.14.2
+    # via
+    #   httpx
+    #   starlette
+attrs==26.1.0
+    # via aiohttp
+bce-python-sdk==0.9.72
+    # via aistudio-sdk
+beautifulsoup4==4.15.0
+    # via capybara-docsaid
+blinker==1.9.0
+    # via flask
+capybara-docsaid==0.12.0
+    # via
+    #   docaligner-docsaid
+    #   mrzscanner-docsaid
+certifi==2026.6.17
+    # via
+    #   httpcore
+    #   httpx
+    #   requests
+chardet==7.4.3
+    # via paddlex
+charset-normalizer==3.4.9
+    # via requests
+click==8.4.2
+    # via
+    #   aistudio-sdk
+    #   flask
+    #   huggingface-hub
+    #   uvicorn
+colorama==0.4.6
+    # via
+    #   click
+    #   colorlog
+    #   onnxslim
+    #   tqdm
+colored==2.3.2
+    # via capybara-docsaid
+coloredlogs==15.0.1 ; sys_platform == 'darwin' or sys_platform == 'linux'
+    # via
+    #   onnxruntime
+    #   onnxruntime-gpu
+colorlog==6.10.1
+    # via paddlex
+contourpy==1.3.3
+    # via matplotlib
+crc32c==2.8
+    # via bce-python-sdk
+cycler==0.12.1
+    # via matplotlib
+dacite==1.9.2
+    # via capybara-docsaid
+dill==0.4.1
+    # via capybara-docsaid
+docaligner-docsaid==1.1.1
+    # via voight
+dotenv==0.9.9
+    # via voight
+fastapi==0.139.2
+    # via voight
+filelock==3.30.2
+    # via
+    #   huggingface-hub
+    #   modelscope
+    #   modelscope-hub
+    #   paddlex
+flask==3.1.3
+    # via capybara-docsaid
+flatbuffers==25.12.19 ; sys_platform == 'darwin' or sys_platform == 'linux'
+    # via
+    #   onnxruntime
+    #   onnxruntime-gpu
+fonttools==4.63.0
+    # via matplotlib
+frozenlist==1.8.0
+    # via
+    #   aiohttp
+    #   aiosignal
+fsspec==2026.6.0
+    # via huggingface-hub
+future==1.0.0
+    # via bce-python-sdk
+h11==0.16.0
+    # via
+    #   httpcore
+    #   uvicorn
+hf-xet==1.5.2 ; platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
+    # via huggingface-hub
+httpcore==1.0.9
+    # via httpx
+httpx==0.28.1
+    # via
+    #   huggingface-hub
+    #   paddlepaddle
+huggingface-hub==1.24.0
+    # via paddlex
+humanfriendly==10.0 ; sys_platform == 'darwin' or sys_platform == 'linux'
+    # via coloredlogs
+idna==3.18
+    # via
+    #   anyio
+    #   httpx
+    #   requests
+    #   yarl
+imagesize==2.0.0
+    # via paddlex
+itsdangerous==2.2.0
+    # via flask
+jinja2==3.1.6
+    # via flask
+kiwisolver==1.5.0
+    # via matplotlib
+markupsafe==3.0.3
+    # via
+    #   flask
+    #   jinja2
+    #   werkzeug
+matplotlib==3.11.1
+    # via
+    #   capybara-docsaid
+    #   voight
+ml-dtypes==0.5.4
+    # via
+    #   onnx
+    #   onnxslim
+modelscope==1.38.1
+    # via paddlex
+modelscope-hub==0.1.7
+    # via modelscope
+mpmath==1.3.0
+    # via sympy
+mrzscanner-docsaid==1.0.7
+    # via voight
+multidict==6.7.1
+    # via
+    #   aiohttp
+    #   yarl
+natsort==8.4.0
+    # via capybara-docsaid
+networkx==3.6.1
+    # via
+    #   capybara-docsaid
+    #   paddlepaddle
+numpy==2.3.5
+    # via
+    #   capybara-docsaid
+    #   contourpy
+    #   matplotlib
+    #   ml-dtypes
+    #   onnx
+    #   onnxruntime
+    #   onnxruntime-gpu
+    #   opencv-contrib-python
+    #   opencv-python
+    #   opencv-python-headless
+    #   opt-einsum
+    #   paddlepaddle
+    #   paddlex
+    #   pandas
+    #   pyturbojpeg
+    #   shapely
+    #   voight
+onnx==1.22.0
+    # via
+    #   capybara-docsaid
+    #   onnxslim
+onnxruntime-gpu==1.22.0 ; sys_platform == 'linux'
+    # via capybara-docsaid
+    # via capybara-docsaid
+onnxslim==0.1.94
+    # via capybara-docsaid
+opencv-contrib-python==4.10.0.84
+    # via paddlex
+opencv-python==5.0.0.93
+    # via capybara-docsaid
+opt-einsum==3.3.0
+    # via paddlepaddle
+packaging==26.2
+    # via
+    #   huggingface-hub
+    #   matplotlib
+    #   modelscope
+    #   onnxruntime
+    #   onnxruntime-gpu
+    #   onnxslim
+    #   paddlex
+    #   pytesseract
+paddleocr==3.7.0
+    # via voight
+    # via voight
+paddlepaddle-gpu @ https://paddle-whl.cdn.bcebos.com/stable/cu118/paddlepaddle-gpu/paddlepaddle_gpu-3.2.2-cp312-cp312-linux_x86_64.whl
+paddlex==3.7.2
+    # via paddleocr
+pandas==3.0.3
+    # via paddlex
+pdf2image==1.17.0
+    # via capybara-docsaid
+piexif==1.1.3
+    # via capybara-docsaid
+pillow==12.3.0
+    # via
+    #   matplotlib
+    #   paddlepaddle
+    #   paddlex
+    #   pdf2image
+    #   pillow-heif
+    #   pytesseract
+pillow-heif==1.4.0
+    # via capybara-docsaid
+prettytable==3.18.0
+    # via
+    #   aistudio-sdk
+    #   paddlex
+propcache==0.5.2
+    # via
+    #   aiohttp
+    #   yarl
+protobuf==7.35.1
+    # via
+    #   onnx
+    #   onnxruntime
+    #   onnxruntime-gpu
+    #   paddlepaddle
+psutil==7.2.2
+    # via
+    #   aistudio-sdk
+    #   capybara-docsaid
+py-cpuinfo==9.0.0
+    # via paddlex
+pybase64==1.4.3
+    # via capybara-docsaid
+pyclipper==1.4.0
+    # via paddlex
+pycryptodome==3.23.0
+    # via bce-python-sdk
+pydantic==2.13.4
+    # via
+    #   fastapi
+    #   paddlex
+pydantic-core==2.46.4
+    # via pydantic
+pyparsing==3.3.2
+    # via matplotlib
+pypdfium2==5.12.1
+    # via paddlex
+python-bidi==0.6.11
+    # via paddlex
+python-dateutil==2.9.0.post0
+    # via
+    #   matplotlib
+    #   pandas
+python-dotenv==1.2.2
+    # via dotenv
+python-multipart==0.0.32
+    # via voight
+pyturbojpeg==1.8.3
+    # via
+    #   capybara-docsaid
+    #   voight
+pyyaml==6.0.2
+    # via
+    #   capybara-docsaid
+    #   huggingface-hub
+    #   paddleocr
+    #   paddlex
+requests==2.34.2
+    # via
+    #   aistudio-sdk
+    #   capybara-docsaid
+    #   modelscope
+    #   modelscope-hub
+    #   paddleocr
+    #   paddlex
+    #   voight
+ruamel-yaml==0.19.1
+    # via paddlex
+safetensors==0.8.0
+    # via paddlepaddle
+setuptools==83.0.0
+    # via modelscope
+shapely==2.1.2
+    # via
+    #   capybara-docsaid
+    #   paddlex
+six==1.17.0
+    # via
+    #   bce-python-sdk
+    #   python-dateutil
+soupsieve==2.9
+    # via beautifulsoup4
+starlette==1.3.1
+    # via fastapi
+sympy==1.14.0
+    # via
+    #   onnxruntime
+    #   onnxruntime-gpu
+    #   onnxslim
+tqdm==4.68.4
+    # via
+    #   aistudio-sdk
+    #   capybara-docsaid
+    #   huggingface-hub
+    #   modelscope
+    #   modelscope-hub
+typing-extensions==4.16.0
+    # via
+    #   aiohttp
+    #   aiosignal
+    #   anyio
+    #   beautifulsoup4
+    #   fastapi
+    #   huggingface-hub
+    #   onnx
+    #   paddleocr
+    #   paddlepaddle
+    #   paddlex
+    #   pydantic
+    #   pydantic-core
+    #   starlette
+    #   typing-inspection
+typing-inspection==0.4.2
+    # via
+    #   fastapi
+    #   pydantic
+tzdata==2026.3 ; sys_platform == 'emscripten' or sys_platform == 'win32'
+    # via pandas
+ujson==5.13.0
+    # via
+    #   capybara-docsaid
+    #   paddlex
+urllib3==2.7.0
+    # via
+    #   modelscope
+    #   modelscope-hub
+    #   requests
+uvicorn==0.51.0
+    # via voight
+wcwidth==0.8.2
+    # via prettytable
+werkzeug==3.1.8
+    # via flask
+yarl==1.24.2
+    # via aiohttp

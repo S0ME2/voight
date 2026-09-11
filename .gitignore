@@ -14,10 +14,12 @@ dist/
 # Environment and local-only config
 .env
 .*/
+!.github/
+!.github/workflows/
+!.github/workflows/ci.yml
 
 # Agent/task-local metadata
 AGENTS.md
-experiments/
 
 # Generated local data
 /.graphify-out/

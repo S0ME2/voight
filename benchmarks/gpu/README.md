@@ -13,7 +13,7 @@ flowchart LR
     C --> D["one experiment axis at a time"]
     D --> E{"evidence<br/>conclusive?"}
     E -->|no| D
-    E -->|yes| F["re-run finalists,<br/>archive outputs/benchmarks/23.gpu-server-benchmark/"]
+    E -->|yes| F["re-run finalists,<br/>archive outputs/benchmarks/1000.gpu-server-benchmark/"]
     F -->|"bring back"| G["CPU comparison<br/>compare_cpu_gpu.py"]
 ```
 
@@ -43,7 +43,7 @@ tests, and importing the package never starts a container.
 Example transfer from the repository parent:
 
 ```bash
-rsync -az --exclude .venv --exclude outputs/benchmarks/23.gpu-server-benchmark/ voight/ v100:/srv/voight/
+rsync -az --exclude .venv --exclude outputs/benchmarks/1000.gpu-server-benchmark/ voight/ v100:/srv/voight/
 ```
 
 ```bash
@@ -110,5 +110,42 @@ configured and actual tensor batches, detector shapes, crop/padding data where
 the server exposes it, and correctness fields from the API.
 
 **[PLANNED]** Outputs are under
-`outputs/benchmarks/23.gpu-server-benchmark/<UTC timestamp>/`. No GPU result
+`outputs/benchmarks/1000.gpu-server-benchmark/<UTC timestamp>/`. No GPU result
 is claimed until the server run is actually performed.
+
+## Recreate benchmark 1003
+
+On the V100, use a benchmark env file with `VOIGHT_BENCHMARK_PROFILE=true`,
+`LOGGING=false`, and `BATCH_MAX_FILES=64`, then start the GPU service:
+
+```bash
+cp .env.example .env.v100-benchmark
+sed -i -e 's/^RUNTIME_TARGET=.*/RUNTIME_TARGET=gpu/' \
+       -e 's/^LOGGING=.*/LOGGING=false/' \
+       -e 's/^BATCH_MAX_FILES=.*/BATCH_MAX_FILES=64/' \
+       -e '/^VOIGHT_BENCHMARK_PROFILE=/d' \
+       .env.v100-benchmark
+printf 'VOIGHT_BENCHMARK_PROFILE=true\n' >> .env.v100-benchmark
+ENV_FILE=.env.v100-benchmark ./setup.sh gpu
+```
+
+Run the two 1003 route profiles with the same corpus, sizes, and three
+measured repeats as the existing result:
+
+```bash
+uv run --no-sync python benchmarks/maintained/profile_other_benchmark.py \
+  --route full-latin-pipeline --base-url http://127.0.0.1:8000 \
+  --dataset-root dataset --sizes 1 2 4 7 8 9 16 32 64 --repeats 3 \
+  --output outputs/benchmarks/1003.full-latin-pipeline/profile.json
+
+uv run --no-sync python benchmarks/maintained/profile_other_benchmark.py \
+  --route comparison --base-url http://127.0.0.1:8000 \
+  --dataset-root dataset --sizes 1 2 4 7 8 9 16 32 64 --repeats 3 \
+  --output outputs/benchmarks/1003.comparison-routes/profile.json
+```
+
+The first run profiles the full Latin extraction route. The second runs the
+verification OCR batch route followed by one `/check` request per returned
+document, and reports the OCR and comparison wall-time split. These are
+server-generated artifacts; do not run the commands with `--execute` on the
+CPU laptop.

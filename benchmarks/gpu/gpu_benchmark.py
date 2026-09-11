@@ -44,7 +44,7 @@ def arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--config", type=Path, help="JSON object/list for --mode custom")
     parser.add_argument("--dataset-root", type=Path, default=ROOT / "dataset")
     # [PLANNED] Created only by an approved V100 server run.
-    parser.add_argument("--output-root", type=Path, default=ROOT / "outputs/benchmarks/23.gpu-server-benchmark")
+    parser.add_argument("--output-root", type=Path, default=ROOT / "outputs/benchmarks/1000.gpu-server-benchmark")
     parser.add_argument("--image", default="voight:gpu")
     parser.add_argument("--gpu-id", type=int, default=int(os.getenv("GPU_ID", "0")))
     parser.add_argument("--port", type=int, default=8090)

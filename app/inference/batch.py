@@ -36,6 +36,11 @@ ChunkValue = TypeVar("ChunkValue")
 ChunkFailurePolicy = Literal["bisect", "whole"]
 
 
+def _record_profile_ns(profile: dict[str, int] | None, name: str, started_ns: int) -> None:
+    if profile is not None:
+        profile[name] = profile.get(name, 0) + time.perf_counter_ns() - started_ns
+
+
 class QueueFullError(RuntimeError):
     pass
 
@@ -1026,9 +1031,12 @@ class ProfileBatchRunner:
         if len(ids) != len(set(ids)):
             raise ValueError("profile batch item IDs must be unique")
         started_total = time.perf_counter()
+        started_total_ns = time.perf_counter_ns()
+        benchmark_profile = {} if os.getenv("VOIGHT_BENCHMARK_PROFILE") else None
 
         groups: dict[str, list[tuple[str, np.ndarray]]] = {}
         padded_images: dict[str, np.ndarray] = {}
+        grouping_started = time.perf_counter_ns()
         for item in items:
             if item.localization_kind not in self.localizers:
                 raise ValueError(f"unknown localization kind: {item.localization_kind}")
@@ -1046,6 +1054,8 @@ class ProfileBatchRunner:
                 groups.setdefault("docaligner", []).append((item.item_id, padded))
             else:
                 groups.setdefault(item.localization_kind, []).append((item.item_id, item.image))
+        _record_profile_ns(benchmark_profile, "runner.input_grouping_ns", grouping_started)
+        localization_started = time.perf_counter_ns()
         localization, errors, localization_diagnostics = self._localize(groups)
         primary_jobs = [
             (item.item_id, item.image)
@@ -1087,10 +1097,12 @@ class ProfileBatchRunner:
             "front_fallback_scanned": len(fallback_items),
             "samples": probe_samples,
         }
+        _record_profile_ns(benchmark_profile, "runner.localization_orchestration_ns", localization_started)
         prepared: dict[str, Any] = {}
         mrz_polygons: dict[str, np.ndarray] = {}
         mrz_crop_trace: list[dict[str, Any]] = []
         preparation_started = time.perf_counter()
+        preparation_started_ns = time.perf_counter_ns()
         for item in items:
             if item.item_id in errors:
                 continue
@@ -1125,6 +1137,7 @@ class ProfileBatchRunner:
                 logger.warning("profile preparation failed for %s", item.item_id, exc_info=True)
                 errors[item.item_id] = error
         preparation_seconds = time.perf_counter() - preparation_started
+        _record_profile_ns(benchmark_profile, "runner.document_preparation_ns", preparation_started_ns)
 
         ocr_samples = [
             OcrSample(
@@ -1140,6 +1153,7 @@ class ProfileBatchRunner:
         ]
         mrz_crops: list[tuple[str, np.ndarray]] = []
         mrz_crop_started = time.perf_counter()
+        mrz_crop_started_ns = time.perf_counter_ns()
         for item in items:
             if item.mrz_profile is None or item.item_id not in mrz_polygons or item.item_id in errors:
                 continue
@@ -1192,8 +1206,10 @@ class ProfileBatchRunner:
                 logger.warning("MRZ crop preparation failed for %s", item.item_id, exc_info=True)
                 errors[item.item_id] = error
         mrz_crop_seconds = time.perf_counter() - mrz_crop_started
+        _record_profile_ns(benchmark_profile, "runner.mrz_crop_preparation_ns", mrz_crop_started_ns)
 
         if self.ocr_grouping == "split":
+            ocr_started_ns = time.perf_counter_ns()
             grouped_samples = {
                 role: [sample for sample in ocr_samples if sample.role == role]
                 for role in ("visible", "mrz")
@@ -1202,8 +1218,10 @@ class ProfileBatchRunner:
                 [self.ocr.run(samples) for samples in grouped_samples.values() if samples]
             )
         else:
+            ocr_started_ns = time.perf_counter_ns()
             ocr_result = self.ocr.run(ocr_samples)
             ocr_result.diagnostics["ocr_grouping"] = "combined"
+        _record_profile_ns(benchmark_profile, "runner.ocr_pipeline_ns", ocr_started_ns)
         mrz_diagnostics = {
             "backend": "generic-paddle" if self.mrz_recognizer is None else "mrzscanner",
             "configured_batch_size": self.mrz_recognition_batch_size,
@@ -1228,6 +1246,7 @@ class ProfileBatchRunner:
         mrz_results: dict[str, MrzRecognitionResult] = {}
         mrz_errors: dict[str, Exception] = {}
         mrz_started = time.perf_counter()
+        mrz_started_ns = time.perf_counter_ns()
         if self.mrz_recognizer is not None:
             for chunk in _chunks(mrz_crops, self.mrz_recognition_batch_size):
                 results, failures = self._recognize_mrz_chunk(
@@ -1236,6 +1255,7 @@ class ProfileBatchRunner:
                 mrz_results.update(results)
                 mrz_errors.update(failures)
         mrz_diagnostics["elapsed_wall_seconds"] = time.perf_counter() - mrz_started
+        _record_profile_ns(benchmark_profile, "runner.mrz_recognition_ns", mrz_started_ns)
         mrz_diagnostics["failure_count"] = len(mrz_errors)
         _finish_stage(mrz_diagnostics)
         errors.update(mrz_errors)
@@ -1243,6 +1263,7 @@ class ProfileBatchRunner:
         for sample_id, error in ocr_result.errors.items():
             errors[sample_id.split(":", 1)[1]] = error
         result_assembly_started = time.perf_counter()
+        result_assembly_started_ns = time.perf_counter_ns()
         parse_validation_seconds = 0.0
         for item in items:
             if item.item_id in errors:
@@ -1288,6 +1309,8 @@ class ProfileBatchRunner:
                     mrz_detected=item.item_id in mrz_polygons,
                 )
         result_assembly_seconds = time.perf_counter() - result_assembly_started
+        _record_profile_ns(benchmark_profile, "runner.result_assembly_ns", result_assembly_started_ns)
+        signature_started_ns = time.perf_counter_ns()
         mrz_output_signatures = {}
         for item in items:
             tokens = ocr_result.tokens.get(f"mrz:{item.item_id}", [])
@@ -1299,6 +1322,7 @@ class ProfileBatchRunner:
                 "reconstructed_line_count": len(selected),
                 "reconstructed_lines_sha256": _text_digest([line.text for line in selected]),
             }
+        _record_profile_ns(benchmark_profile, "runner.mrz_signature_ns", signature_started_ns)
 
         diagnostics = {
             "total_wall_seconds": time.perf_counter() - started_total,
@@ -1316,6 +1340,9 @@ class ProfileBatchRunner:
             "mrz_recognition": mrz_diagnostics,
             "mrz_output_signatures": mrz_output_signatures,
         }
+        if benchmark_profile is not None:
+            benchmark_profile["runner.total_ns"] = time.perf_counter_ns() - started_total_ns
+            diagnostics["benchmark_profile"] = benchmark_profile
         if mrz_crop_trace:
             line_records = {}
             for call in ocr_result.diagnostics.get("text_recognition", {}).get("calls", []):

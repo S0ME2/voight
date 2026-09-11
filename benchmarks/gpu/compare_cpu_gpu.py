@@ -64,7 +64,7 @@ def main(argv=None) -> int:
     parser.add_argument("gpu_output", type=Path)
     parser.add_argument("cpu_output", type=Path)
     # [PLANNED] Created only after a GPU result exists for comparison.
-    parser.add_argument("--output", type=Path, default=Path("outputs/benchmarks/23.gpu-server-benchmark/cpu-vs-gpu-comparison"))
+    parser.add_argument("--output", type=Path, default=Path("outputs/benchmarks/1000.gpu-server-benchmark/cpu-vs-gpu-comparison"))
     args = parser.parse_args(argv)
     print(json.dumps(compare(args.gpu_output, args.cpu_output, args.output), indent=2))
     return 0
